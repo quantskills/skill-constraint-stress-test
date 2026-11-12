@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `references/data_access.md`：数据接入说明（凭证来源、夹具真实/合成比例、离线边界、给其他 AI 的操作约定）
 - `references/validation_evidence.md`：实测验证记录（152 例测试分布、三种被测系统的真实结果、冻结基线可比性、错误路径），全部附复现命令
 - **Anthropic 协议支持**：`CONSTRAINT_LLM_PROTOCOL=anthropic` 走 `/v1/messages`，接入本机 LLM 代理；`auto` 自动实测两种协议
 - `CONSTRAINT_LLM_API_KEY` 缺省时回退读取 `ANTHROPIC_AUTH_TOKEN`

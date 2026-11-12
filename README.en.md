@@ -51,7 +51,8 @@ This skill constructs those fault scenarios, replays the trader's decision chain
 ├── references/
 │   ├── api_guide.md                ← CLI / API and field reference
 │   ├── constraint_trigger_map.md   ← Constraint trigger mapping
-│   └── validation_evidence.md      ← Validation evidence (reproducible)
+│   ├── validation_evidence.md      ← Validation evidence (reproducible)
+│   └── data_access.md              ← Data access (credentials, provenance, offline boundary)
 └── fixtures/                       ← Evaluation fixtures (deterministic, no credentials)
     ├── generated/                  ← Auto-generated fixtures
     ├── manual/                     ← Hand-written fixtures
@@ -429,8 +430,20 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 
 ## Data Sources
 
-- Fixture generation: PandaAI data (`panda-data==1.0.6`), credentials supplied via `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` environment variables — **never committed**
-- Evaluation: reads local `fixtures/` only; no external calls
+| Stage | Data | Credentials required |
+|---|---|---|
+| Fixture generation | PandaAI data (`panda-data==1.0.6`) | **Yes**, this stage only |
+| Evaluation | Local `fixtures/`, read-only | **No** |
+
+Credentials are read only from environment variables (`PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL`) or `~/.pandadata/pandadata.env` — **never committed to the repo**.
+
+`fixtures/generated/` holds 109 fixtures:
+
+- **26** derived from real panda_data (real symbol codes; prices and P&L are constructed), marked with `"_source": "pandadata_*"`
+- **83** hand-built boundary values covering the 12 hard constraints
+
+> **No credentials needed after clone**: `python3 scripts/build.py` runs immediately.
+> Full details: [`references/data_access.md`](references/data_access.md).
 
 ## Dependencies
 

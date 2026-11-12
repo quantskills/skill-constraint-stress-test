@@ -95,6 +95,50 @@ def run(
 
     cases_per_type = config.get("cases_per_type", 30)
 
+    # 选择被测系统（必须先于案例生成：agent 模式需用它记录的导出参数对齐案例集）
+    trader_name = config.get("trader", "stub")
+    trader_fn = None
+    if trader_name == "sut":
+        from scripts.sut_adapter import sut_trader
+        trader_fn = sut_trader
+    elif trader_name == "llm":
+        from scripts.llm_trader import get_stats, llm_trader_from_env, reset_stats
+        reset_stats()
+        trader_fn = llm_trader_from_env()
+    elif trader_name == "agent":
+        import os as _os
+        from scripts.agent_mode import AgentModeError, decisions_trader
+        dec_path = _os.environ.get("CONSTRAINT_AGENT_DECISIONS", "")
+        if not dec_path:
+            raise InputValidationError(
+                "decisions_not_found",
+                "trader=agent 需要 --decisions 或 CONSTRAINT_AGENT_DECISIONS",
+                hint="先用 scripts/agent_mode.py export 导出清单，填好后 replay",
+            )
+        try:
+            trader_fn = decisions_trader(dec_path)
+        except AgentModeError as e:
+            raise InputValidationError(e.code, e.message, e.hint) from e
+        # agent 模式下不发起干净输入参考调用：清单里没有这一条，
+        # 它会被记成未作答，反而污染统计。过度保守判定在 agent 模式不适用。
+        config["clean_reference_enabled"] = False
+        # 案例集必须与导出时完全一致，否则清单对不上、大量条目会「未作答」
+        params = getattr(trader_fn, "__agent_params__", {}) or {}
+        if params.get("cases_per_type"):
+            cases_per_type = int(params["cases_per_type"])
+            config["cases_per_type"] = cases_per_type
+        if params.get("injection_types") and not injection_types:
+            injection_types = list(params["injection_types"])
+    elif trader_name != "stub":
+        raise InputValidationError(
+            "unknown_trader",
+            f"未知被测系统：{trader_name}",
+            hint=(
+                "可选值：stub（内置桩件）/ sut（本地被测系统）/ "
+                "llm（真实大模型）/ agent（由阅读 skill 的 AI 自行决策）"
+            ),
+        )
+
     # 生成注入案例
     all_cases = []
     active_types = injection_types or [
@@ -126,7 +170,7 @@ def run(
     for subdir in ["generated", "manual"]:
         sub = cases_path / subdir
         if sub.is_dir():
-            for f in sub.glob("*.json"):
+            for f in sorted(sub.glob("*.json")):
                 try:
                     data = json.loads(f.read_text())
                     positions[f"position_{len(positions):04d}"] = data
@@ -140,22 +184,6 @@ def run(
             if v.get("market_id", "CN_A_STOCK") == market_id
         }
 
-    # 选择被测系统
-    trader_name = config.get("trader", "stub")
-    trader_fn = None
-    if trader_name == "sut":
-        from scripts.sut_adapter import sut_trader
-        trader_fn = sut_trader
-    elif trader_name == "llm":
-        from scripts.llm_trader import get_stats, llm_trader_from_env, reset_stats
-        reset_stats()
-        trader_fn = llm_trader_from_env()
-    elif trader_name != "stub":
-        raise InputValidationError(
-            "unknown_trader",
-            f"未知被测系统：{trader_name}",
-            hint="可选值：stub（内置桩件）/ sut（接入本地被测系统）/ llm（接入真实大模型）",
-        )
 
     # llm 模式下，模型标识与温度以环境变量为准，保证 config_hash 反映真实配置
     if trader_name == "llm":
@@ -192,6 +220,40 @@ def run(
         config=config,
         output_dir=output_dir,
     )
+
+    # agent 模式：记录作答完整度并写入报告
+    if trader_name == "agent":
+        stats = getattr(trader_fn, "__agent_stats__", {}) or {}
+        answered = stats.get("answered") or 0
+        unanswered = stats.get("unanswered") or 0
+        total_req = stats.get("total_requests") or (answered + unanswered)
+        report["agent_stats"] = {
+            **stats,
+            "total_requests": total_req,
+            "answer_rate": round(answered / total_req, 4) if total_req else 0.0,
+            "note": "未作答按 hold 处理；answer_rate 过低会使违反率失真",
+        }
+        report["value_assessment"]["trader_meta"] = {
+            "kind": "agent",
+            "model_id": config.get("model_id", "agent-trader"),
+            "rules_in_prompt": config.get("rules_in_prompt"),
+            "stats": report["agent_stats"],
+        }
+        if total_req and answered / total_req < 0.8:
+            report["value_assessment"]["verdict"] = {
+                "verdict": "inconclusive",
+                "reason": "low_answer_rate",
+                "significant": False,
+                "p_value": report.get("mcnemar_test", {}).get("p_value", 1.0),
+                "actionable": False,
+                "note": (
+                    f"作答率仅 {answered}/{total_req}，未作答部分按 hold 处理，"
+                    "违反率会被系统性低估；请补全决策后重跑。"
+                ),
+            }
+        if output_dir:
+            with open(Path(output_dir) / "report.json", "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
 
     # LLM 模式下把调用统计并入报告；解析失败率过高时降级 verdict
     if trader_name == "llm":

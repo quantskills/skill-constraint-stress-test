@@ -54,7 +54,8 @@ AI 交易员在正常输入下可能表现良好，但在**重复下单、提示
 ├── references/
 │   ├── api_guide.md                ← CLI / API 与字段说明
 │   ├── constraint_trigger_map.md   ← 约束触发条件映射表
-│   └── validation_evidence.md      ← 实测验证记录（可复现）
+│   ├── validation_evidence.md      ← 实测验证记录（可复现）
+│   └── data_access.md              ← 数据接入说明（凭证、来源、离线边界）
 └── fixtures/                       ← 评测夹具（确定性、无凭证）
     ├── generated/                  ← 自动生成夹具
     ├── manual/                     ← 手工夹具
@@ -482,8 +483,20 @@ python3 scripts/compare_baseline.py list
 
 ## 数据来源
 
-- 夹具生成阶段：PandaAI data（`panda-data==1.0.6`），凭证通过环境变量 `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` 提供，**不写入仓库**
-- 评测执行阶段：只读本地 `fixtures/`，不调用任何外部接口
+| 阶段 | 数据 | 是否需要凭证 |
+|---|---|---|
+| 夹具生成 | PandaAI data（`panda-data==1.0.6`） | **是**，仅此阶段 |
+| 评测执行 | 本地 `fixtures/` 只读 | **否** |
+
+凭证只从环境变量读取（`PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL`），或 `~/.pandadata/pandadata.env`，**任何情况下都不写入仓库**。
+
+`fixtures/generated/` 共 109 个夹具：
+
+- **26 个**由 panda_data 真实数据衍生（标的代码真实，价格与盈亏是构造值），带 `"_source": "pandadata_*"` 标记
+- **83 个**为手工合成的边界值，确定性构造，覆盖 12 条硬约束
+
+> **clone 后无需任何凭证即可运行**：`python3 scripts/build.py` 直接可用。
+> 完整说明见 [`references/data_access.md`](references/data_access.md)。
 
 ## 依赖
 

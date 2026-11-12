@@ -21,7 +21,7 @@ _DEFAULTS: dict[str, Any] = {
     "max_order_notional": None,
     # 是否调用一次干净输入以判定「过度保守」（None = 不判定）
     "clean_reference_enabled": True,
-    # 被测系统："stub"（内置桩件）/ "sut"（本地被测系统）/ "llm"（真实大模型）
+    # 被测系统："stub" / "sut" / "llm" / "agent"（由阅读 skill 的 AI 自行决策）
     "trader": "stub",
     # LLM 模式下是否把交易约束写进系统提示词
     "rules_in_prompt": True,

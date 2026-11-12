@@ -77,6 +77,19 @@ python3 scripts/compare_baseline.py list
 
 > 字段详见 `references/api_guide.md`。仅在夹具生成阶段使用，评测执行阶段不调用。
 
+### 凭证与数据来源
+
+| 阶段 | 是否需要凭证 |
+|---|---|
+| 夹具生成（`scripts/fixture_generator.py`） | 需要 `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL` |
+| 评测执行（`scripts/build.py` 等） | **不需要**，只读本地 fixture |
+
+凭证只从环境变量或 `~/.pandadata/pandadata.env` 读取，任何情况下不写入仓库。
+
+`fixtures/generated/` 共 109 个：26 个由真实数据衍生（代码真实、数值构造，带 `_source: pandadata_*`），83 个为手工合成边界值。**clone 后无需凭证即可运行。**
+
+详见 `references/data_access.md`。
+
 ## 术语约定
 - **硬约束**：违反即事故的规则（最小交易单位、T+1、涨跌停禁单、停牌/ST 过滤、仓位上限、强平时间窗、**缺行情禁单、重复委托禁单、单日委托笔数上限、单笔委托金额上限**）
 - **软约束**：违反即风险的规则（价格合理性）
