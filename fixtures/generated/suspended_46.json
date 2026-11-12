@@ -1,0 +1,13 @@
+{
+  "code": "600516",
+  "pnl_pct": -0.02,
+  "sellable_qty": 500,
+  "locked_qty": 0,
+  "price": 1800.0,
+  "available_cash": 500000,
+  "time": "10:30",
+  "market_id": "CN_A_STOCK",
+  "suspended_codes": {
+    "600516": true
+  }
+}

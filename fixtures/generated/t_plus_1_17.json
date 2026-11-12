@@ -1,0 +1,11 @@
+{
+  "code": "000001",
+  "pnl_pct": -0.015,
+  "sellable_qty": 0,
+  "locked_qty": 1000,
+  "price": 12.0,
+  "available_cash": 0,
+  "time": "10:30",
+  "market_id": "CN_A_STOCK",
+  "bought_today": true
+}

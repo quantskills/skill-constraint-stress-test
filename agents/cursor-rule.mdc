@@ -1,0 +1,59 @@
+---
+description: AI trader constraint stress test and fault-injection replay — four fault types (duplicate input, prompt perturbation, missing quotes, timeout/retry), market-agnostic constraint evaluator, with/without constraint-layer comparison reporting violation rate, duplicate-action rate, refusal count, and ARR/RRR/NNT.
+globs: []
+alwaysApply: false
+---
+
+# skill-constraint-stress-test
+
+Evaluation skill for AI traders. Constructs abnormal-input scenarios, replays the decision chain, and quantifies whether a constraint-validation layer actually reduces constraint violations.
+
+## When to use
+
+- You want to verify that an AI trader's decision → execution chain respects trading constraints
+- You want to quantify the incremental value of a constraint-validation layer
+- You want to build a reusable fault-injection case set for stress testing
+
+## Quick start
+
+```bash
+# Install test dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+python3 -m pytest tests/ -v
+
+# Full evaluation
+python3 scripts/build.py
+
+# CLI
+python3 scripts/run_eval.py --cases-dir fixtures/ --output-dir output/
+```
+
+## Supported markets
+
+| market_id | Constraints |
+|---|---|
+| `CN_A_STOCK` | 100-share lots, T+1, price limits, suspended/ST filter, position cap, 14:45 force-close |
+| `HK_STOCK` | Board lots, 15:45 force-close window |
+| `INDEX_FUTURE` | Contract multiplier, margin |
+| `COMMODITY_FUTURE` | Contract multiplier, margin |
+| `CRYPTO` | T+0 extension example |
+
+## Outputs
+
+- `output/report.json` — aggregate statistics (violation rates, duplicate count, refusal count, ARR/RRR/NNT)
+- `output/events_with_checks.jsonl` / `output/events_without_checks.jsonl` — event streams
+- `output/pairwise_comparison.jsonl` — per-event paired comparison
+
+## Dependencies
+
+- Python 3.10+
+- PyYAML (optional; falls back to built-in defaults)
+- panda-data==1.0.6 (fixture generation only)
+
+## Notes
+
+Replay only — never connects to a live account or places real orders. Cross-model comparisons must fix `model_id`, temperature, case count, injection types, and budget (all hashed into `config_hash`); results from different models must not be merged.
+
+Research and educational use only. Not investment advice. Results are simulated replays, not actual trading performance.

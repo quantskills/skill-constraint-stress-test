@@ -1,0 +1,25 @@
+{
+  "name": "skill-constraint-stress-test",
+  "version": "0.1.0",
+  "entrypoint": "SKILL.md",
+  "runtime": "python>=3.10",
+  "license": "GPL-3.0-only",
+  "data_source": "PandaData",
+  "entry_script": "scripts/build.py",
+  "evaluation": {
+    "mode": "replay-only",
+    "live_trading_access": false,
+    "description": "评测全程基于本地 fixture 回放，不连接实盘账户、真实交易网关或生产委托通道；禁止为触发测试场景真实下单。",
+    "models_under_test": [
+      {
+        "id": "stub-trader",
+        "role": "subject",
+        "description": "内置桩件，固定返回 hold，用于验证评测链路本身",
+        "budget": { "tokens": 0, "timeout_s": 0 }
+      }
+    ],
+    "group_by": "model_id",
+    "comparability_policy": "跨模型比较必须固定 fixture 集、注入类型、案例数、阈值、温度与预算；上述字段计入 config_hash。不同模型结果不得合并为同一指标。"
+  },
+  "data_source_note": "仅夹具生成阶段使用 panda-data==1.0.6，评测执行阶段只读本地 fixture"
+}

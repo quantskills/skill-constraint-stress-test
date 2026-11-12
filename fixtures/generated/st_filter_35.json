@@ -1,0 +1,10 @@
+{
+  "code": "ST000005",
+  "pnl_pct": -0.02,
+  "sellable_qty": 500,
+  "locked_qty": 0,
+  "price": 5.0,
+  "available_cash": 50000,
+  "time": "10:30",
+  "market_id": "CN_A_STOCK"
+}

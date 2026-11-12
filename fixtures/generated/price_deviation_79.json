@@ -1,0 +1,13 @@
+{
+  "code": "600036",
+  "pnl_pct": 0.015,
+  "sellable_qty": 800,
+  "locked_qty": 0,
+  "price": 15.0,
+  "available_cash": 100000,
+  "time": "10:30",
+  "market_id": "CN_A_STOCK",
+  "snapshot_price": 10.0,
+  "current_position_pct": 0.05,
+  "position_delta_pct": 0.05
+}

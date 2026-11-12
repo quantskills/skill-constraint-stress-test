@@ -1,0 +1,85 @@
+openapi: 3.1.0
+info:
+  title: skill-constraint-stress-test
+  description: AI trader constraint stress test and fault-injection replay. Injects duplicate input, prompt perturbation, missing quotes, and timeout/retry faults, then replays decisions with and without a constraint-validation layer to report violation rate, duplicate-action rate, refusal count, and ARR/RRR/NNT effect sizes.
+  version: 0.1.0
+
+x-skill-info:
+  name: skill-constraint-stress-test
+  type: build
+  category: evaluation
+  entry: scripts/build.py
+  tags: [quant, build, evaluation, fault-injection, stress-test, constraint-check]
+
+x-steps:
+  - id: evaluate
+    script: scripts/build.py
+    description: Run the full constraint stress-test evaluation and emit aggregate statistics
+    args:
+      cases_dir: "fixtures/"
+      output_dir: "output/"
+    auth_required: false
+    output: "output/report.json, output/events_with_checks.jsonl, output/events_without_checks.jsonl, output/pairwise_comparison.jsonl"
+
+  - id: self_check
+    script: scripts/env_check.py
+    description: Validate the runtime environment and report blockers as structured JSON
+    args: "--self-check --json"
+    auth_required: false
+
+  - id: validate_events
+    script: scripts/validate.py
+    description: Validate a JSONL event log against the event contract
+    args: "output/events_with_checks.jsonl --json"
+    auth_required: false
+
+  - id: generate_fixtures
+    script: scripts/fixture_generator.py
+    description: Regenerate evaluation fixtures (requires panda_data credentials)
+    args: "--date 20250115"
+    auth_required: true
+
+x-injection-types:
+  - duplicate
+  - prompt_perturb
+  - missing_quote
+  - timeout_retry
+
+x-markets:
+  - CN_A_STOCK
+  - HK_STOCK
+  - INDEX_FUTURE
+  - COMMODITY_FUTURE
+  - CRYPTO
+
+x-outputs:
+  - format: json
+    path: output/report.json
+    description: Aggregate statistics (violation rates, duplicate count, refusal count, ARR/RRR/NNT)
+  - format: jsonl
+    path: output/events_with_checks.jsonl
+    description: Event stream with the constraint layer enabled
+  - format: jsonl
+    path: output/events_without_checks.jsonl
+    description: Event stream without the constraint layer
+  - format: jsonl
+    path: output/pairwise_comparison.jsonl
+    description: Per-event paired comparison
+
+x-evaluation-policy:
+  mode: replay-only
+  live_trading_access: false
+  note: "基于本地 fixture 回放；禁止为触发测试场景真实下单。跨模型比较须固定 model_id/temperature/cases_per_type/injection_types/budget 并计入 config_hash；不同模型结果不得合并。"
+  models_under_test:
+    - id: stub-trader
+      role: subject
+
+x-requirements:
+  runtime: python >= 3.10
+  packages:
+    - pyyaml (optional)
+    - pytest (dev)
+    - panda-data==1.0.6 (fixture generation only)
+  env:
+    - PANDA_DATA_USERNAME
+    - PANDA_DATA_PASSWORD

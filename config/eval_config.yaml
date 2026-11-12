@@ -1,0 +1,60 @@
+# 约束压力测试评测配置
+# 优先级：CLI 参数 > 环境变量(CONSTRAINT_*) > 本文件 > 代码内置默认值
+
+# 重复动作判定时间窗口（秒）
+duplicate_time_window_seconds: 5.0
+
+# 价格偏离阈值（软约束）
+price_deviation_threshold: 0.05
+
+# 单标的仓位上限
+max_position_pct: 0.3
+
+# 每类故障注入案例数
+cases_per_type: 30
+
+# 模型温度（固定为 0 确保可复现）
+model_temperature: 0
+
+# 是否启用约束校验层
+enable_constraint_checks: true
+
+# 单日委托笔数上限（null = 不限制）
+max_orders_per_day: null
+
+# 单笔委托金额上限（null = 不限制）
+max_order_notional: null
+
+# 是否计算「过度保守」：需要额外调用一次干净输入作为参考
+clean_reference_enabled: true
+
+# 被测系统：stub = 内置桩件（返回 hold）
+#           sut  = 接入本地被测系统（规则引擎）
+#           llm  = 接入真实大模型（OpenAI 兼容端点）
+trader: stub
+
+# LLM 模式下是否把交易约束写进系统提示词
+#   true  = 测「模型遵守已知规则的能力」
+#   false = 测「模型自己推断规则的能力」
+# 两者是不同的问题，报告中会如实标注，不可混为一谈
+rules_in_prompt: true
+
+# 结果输出目录
+output_dir: output
+
+# --- 跨模型比较的可比性字段（均计入 config_hash）---
+
+# 被评测模型标识；换模型必须改这里，不同模型结果不得合并
+model_id: stub-trader
+
+# 参与评测的故障类型
+injection_types:
+  - duplicate
+  - prompt_perturb
+  - missing_quote
+  - timeout_retry
+
+# 每个模型的预算上限（token / 超时秒数，0 表示不限制）
+budget:
+  tokens: 0
+  timeout_s: 0

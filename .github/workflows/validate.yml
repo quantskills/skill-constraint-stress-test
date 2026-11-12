@@ -1,0 +1,65 @@
+name: skill-constraint-stress-test validation
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install lightweight dev dependencies
+        run: |
+          pip install pytest pyyaml
+
+      - name: Run pytest
+        run: python -m pytest tests/ -v
+
+      # --- 负路径反向断言 ---
+
+      - name: "Negative: stdout is pure JSON on missing argument"
+        run: |
+          code=0; python scripts/run_eval.py --cases-dir /nonexistent 2>/dev/null || code=$?
+          # 退出码应为 2（参数错误）或 1（运行时错误）
+          if [ "$code" -eq 0 ]; then echo "FAIL: expected non-zero exit"; exit 1; fi
+          # stdout 最后一行必须是合法 JSON
+          output=$(python scripts/run_eval.py --cases-dir /nonexistent 2>/dev/null || true)
+          echo "$output" | tail -1 | python -c "import sys,json; json.loads(sys.stdin.read())" || { echo "FAIL: stdout not pure JSON"; exit 1; }
+
+      - name: "Negative: self-check reports blocked when fixtures missing"
+        run: |
+          # 临时移走 fixtures 目录测试阻塞报告
+          mv fixtures fixtures_bak 2>/dev/null || true
+          code=0; python scripts/env_check.py --self-check --json || code=$?
+          mv fixtures_bak fixtures 2>/dev/null || true
+          if [ "$code" -eq 0 ]; then echo "FAIL: expected non-zero for missing fixtures"; exit 1; fi
+
+      - name: "Negative: validate.py rejects malformed JSONL"
+        run: |
+          echo "not valid json" > /tmp/bad_events.jsonl
+          code=0; python scripts/validate.py /tmp/bad_events.jsonl || code=$?
+          if [ "$code" -eq 0 ]; then echo "FAIL: expected non-zero for bad JSONL"; exit 1; fi
+          rm -f /tmp/bad_events.jsonl
+
+      - name: "Negative: dependency_missing hint contains install command"
+        run: |
+          # env_check 在缺 panda_data 时应 warn 而非 blocked（因为是可选依赖）
+          output=$(python scripts/env_check.py --self-check --json 2>/dev/null || true)
+          echo "$output" | python -c "
+          import sys, json
+          r = json.loads(sys.stdin.read())
+          for g in r['groups']:
+            for item in g['items']:
+                if item['name'] == 'panda_data' and item['status'] == 'warn':
+                    assert 'pip install' in item.get('hint', ''), 'hint must contain pip install'
+          print('OK: dependency hint verified')
+          "

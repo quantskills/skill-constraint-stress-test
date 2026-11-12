@@ -1,0 +1,8 @@
+# 测试策略：刻意不继承 requirements.txt
+# 理由：重框架（panda-data 及其 pandas/numpy/snappy 等传递依赖）在 tests/ 内不需要，
+# 约束判定器、注入器、回放引擎均为纯 Python 标准库实现。
+# CI 因此能在十几秒内跑完而不是先拉几百 MB 二进制。
+# 「缺依赖必须结构化报错」这条负路径天然可测——env_check.py 在缺 panda_data 时
+# 如实报告 warn 而非 blocked，验证降级行为。
+pytest>=7.0
+pyyaml>=6.0

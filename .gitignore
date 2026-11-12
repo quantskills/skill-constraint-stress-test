@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Skill runtime output
+output/
+
+# 冻结基线（本地快照，不随仓库发布）
+baselines/
+
+# 日志
+*.log
+
+# 注：fixtures/generated/ 中的评测夹具随仓库发布（确定性、无凭证），
+# 保证 clone 后无需凭证即可运行；需要重建时执行
+# python3 scripts/fixture_generator.py --manual-only

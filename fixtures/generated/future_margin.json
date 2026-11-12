@@ -1,0 +1,12 @@
+{
+  "code": "IF2401",
+  "pnl_pct": 0.005,
+  "sellable_qty": 2,
+  "locked_qty": 0,
+  "price": 3500.0,
+  "available_cash": 5000,
+  "time": "10:30",
+  "market_id": "CN_INDEX_FUTURE",
+  "current_position_pct": 0.05,
+  "position_delta_pct": 0.05
+}

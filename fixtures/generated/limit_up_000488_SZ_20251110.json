@@ -1,0 +1,13 @@
+{
+  "code": "000488.SZ",
+  "pnl_pct": 0.1,
+  "sellable_qty": 0,
+  "locked_qty": 0,
+  "price": 2.16,
+  "available_cash": 100000,
+  "time": "10:30",
+  "market_id": "CN_A_STOCK",
+  "_source": "pandadata_limit_up",
+  "_date": "20251110",
+  "prev_close": 1.96
+}
