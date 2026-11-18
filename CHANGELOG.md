@@ -1,3 +1,16 @@
+## [0.4.2] — 2026-11-19
+
+### Added
+- `skill.json` 的 `evaluation.models_under_test` 按任务要求**逐模型单列**：
+  `stub-trader`（链路自检，须判 `inconclusive`）、`sut-rule-engine`（判别臂，已跑，
+  `positive`）、`host-agent`（宿主 agent 作答臂，已跑，`inconclusive`），
+  以及 **`jev-dedicated` 与 `flash` 两行显式标 `not_evaluated`**（含未跑原因），
+  并新增 `no_merge_policy`：不同模型指标不合并、不互为评审。
+  此前依赖表只有 `stub-trader` 一行，「JEV 专用模型与 Flash 不可混作同一评审模型」
+  这条协作要求只做到了「没混算」，没有做到「单列」。
+
+---
+
 ## [0.4.1] — 2026-11-19
 
 ### Fixed

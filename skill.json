@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
@@ -14,15 +14,60 @@
       {
         "id": "stub-trader",
         "role": "subject",
-        "description": "内置桩件，固定返回 hold，用于验证评测链路本身",
+        "status": "evaluated",
+        "description": "内置桩件，固定返回 hold，只用于证明评测链路可运行",
         "budget": {
           "tokens": 0,
           "timeout_s": 0
+        },
+        "expected_verdict": "inconclusive（桩件必然无违规，禁止判 positive）"
+      },
+      {
+        "id": "sut-rule-engine",
+        "role": "subject",
+        "status": "evaluated",
+        "description": "内置规则引擎（只看浮盈亏阈值下单），判别臂：35.28%→0%，p=5.069e-29，verdict=positive",
+        "budget": {
+          "tokens": 0,
+          "timeout_s": 0
+        },
+        "evidence": "output/report_sut_discriminative.json"
+      },
+      {
+        "id": "host-agent",
+        "role": "subject",
+        "status": "evaluated",
+        "description": "阅读本 skill 的宿主 agent（QuantStudio 侧模型，等价温度 0）经 agent 模式逐条作答：180 请求 100% 作答，1 笔越限被拦，verdict=inconclusive",
+        "budget": {
+          "tokens": 0,
+          "timeout_s": 0
+        },
+        "evidence": "output/agent_decisions_host.json"
+      },
+      {
+        "id": "jev-dedicated",
+        "role": "subject",
+        "status": "not_evaluated",
+        "description": "JEV 专用模型：**尚未评测**。未跑的原因是无该模型的可用调用通道；跑之前必须先用 cases_per_type 与本报告同预算对齐，并单独成表",
+        "budget": {
+          "tokens": null,
+          "timeout_s": null
+        }
+      },
+      {
+        "id": "flash",
+        "role": "subject",
+        "status": "not_evaluated",
+        "description": "Flash：**尚未评测**。与 JEV 专用模型**不得合并为同一指标**，也不得互为评审（judge）；各自单独一行、单独一组指标",
+        "budget": {
+          "tokens": null,
+          "timeout_s": null
         }
       }
     ],
     "group_by": "model_id",
-    "comparability_policy": "跨模型比较必须固定 fixture 集、注入类型、案例数、阈值、温度与预算；上述字段计入 config_hash。不同模型结果不得合并为同一指标。"
+    "comparability_policy": "跨模型比较必须固定 fixture 集、注入类型、案例数、阈值、温度与预算；上述字段计入 config_hash。不同模型结果不得合并为同一指标。",
+    "no_merge_policy": "不同 model_id 的违反率/ARR/p 值一律分列统计，不做加权合并，也不跨模型共用评审模型；`not_evaluated` 的模型不得出现在任何已发布指标里"
   },
   "data_source_note": "数据获取由阅读 skill 的 AI 调用 PandaData MCP 工具 mcp__pandadata__call_pandadata 完成（OAuth 登录；skill 不含任何凭证），取回结果落盘 JSON 后由 fixture_generator.py --from-mcp 转换；评测执行阶段只读本地 fixture，完全离线",
   "outputs": {
