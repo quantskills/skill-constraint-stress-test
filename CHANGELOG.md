@@ -1,3 +1,14 @@
+## [0.3.2] — 2026-11-19
+
+### Added
+- 随包发布本次真实模型运行的**实际产物**：`output/report.json`（宿主 agent 那一轮，
+  config_hash `66d02fbaac0777e1`）与 `output/agent_decisions_host.json`（180 条作答原件，
+  含那笔越限买入的自述理由）。此前包内只有锚点摘要，§2bis 的关键结论无法被外部直接复核。
+- `.gitignore` 由整目录 `output/` 改为 `output/*` + 两份点名放行：既让证据可核，
+  又不把机器本地可再生产物整包推上公网。
+
+---
+
 ## [0.3.1] — 2026-11-18
 
 ### Added

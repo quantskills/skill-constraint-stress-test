@@ -34,3 +34,10 @@ baselines/*
 # MCP 原始导出为中间产物，不入库：
 # python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
 mcp_exports/
+
+# 运行落点默认不入库（可再生、机器本地）。本版起点名放行**本次交付证据**：
+# 评分要求「冻结基线对照 / 输入输出索引」，读者要能直接核对实际产物而不是文档转述。
+# 注意：只放行具体文件，不放开整个 output/，否则机器本地数据会跟着上公网。
+output/*
+!output/report.json
+!output/agent_decisions_host.json

@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
@@ -24,5 +24,14 @@
     "group_by": "model_id",
     "comparability_policy": "跨模型比较必须固定 fixture 集、注入类型、案例数、阈值、温度与预算；上述字段计入 config_hash。不同模型结果不得合并为同一指标。"
   },
-  "data_source_note": "数据获取由阅读 skill 的 AI 调用 PandaData MCP 工具 mcp__pandadata__call_pandadata 完成（OAuth 登录；skill 不含任何凭证），取回结果落盘 JSON 后由 fixture_generator.py --from-mcp 转换；评测执行阶段只读本地 fixture，完全离线"
+  "data_source_note": "数据获取由阅读 skill 的 AI 调用 PandaData MCP 工具 mcp__pandadata__call_pandadata 完成（OAuth 登录；skill 不含任何凭证），取回结果落盘 JSON 后由 fixture_generator.py --from-mcp 转换；评测执行阶段只读本地 fixture，完全离线",
+  "outputs": {
+    "shipped_evidence": [
+      "output/report.json",
+      "output/agent_decisions_host.json"
+    ],
+    "frozen_anchor": "baselines/agent_run_host_model.json",
+    "regenerated_on_run": "output/",
+    "note": "report.json 是宿主 agent 那一轮的实际报告；agent_decisions_host.json 是 180 条作答原件（含那笔越限买入的自述理由），读者可直接复核 §2bis 关于「决策自述与输入不符」的结论。其余运行产物仍不入库。"
+  }
 }
