@@ -1,3 +1,14 @@
+## [0.4.1] — 2026-11-19
+
+### Fixed
+- **0.4.0 少发了一件自己声称发过的产物**：`output/report_sut_discriminative.json` 被
+  `.gitignore` 的 `output/*` 挡住——放行清单是逐文件点名的，新增证据文件时忘记同步追加
+  `!output/report_sut_discriminative.json`。锚点 `baselines/sut_discriminative.json` 当时已在包内，
+  因此远端并非空证据，但 §2ter 引用的原始报告缺失。现补放行，并把「正向断言失败即中止提交」
+  固化为流程要求（本次正是该断言在提交前抓出的）。
+
+---
+
 ## [0.4.0] — 2026-11-19
 
 ### Added

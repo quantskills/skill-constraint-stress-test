@@ -39,4 +39,5 @@ mcp_exports/
 # 注意：只放行具体文件，不放开整个 output/，否则机器本地数据会跟着上公网。
 output/*
 !output/report.json
+!output/report_sut_discriminative.json
 !output/agent_decisions_host.json
