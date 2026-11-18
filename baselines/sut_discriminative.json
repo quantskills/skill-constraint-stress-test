@@ -1,0 +1,178 @@
+{
+  "frozen_at": "2026-11-18T16:37:26.088368+00:00",
+  "name": "sut_discriminative",
+  "run_id": "abec4f78",
+  "model_id": "sut-trader",
+  "config_hash": "ab63975d2d6f9430",
+  "total_events": 360,
+  "comparability": {
+    "trader": "sut",
+    "rules_in_prompt": true,
+    "model_id": "sut-trader",
+    "model_temperature": 0,
+    "cases_per_type": 60,
+    "injection_types": [
+      "duplicate",
+      "prompt_perturb",
+      "missing_quote",
+      "timeout_retry"
+    ],
+    "budget": {
+      "tokens": 0,
+      "timeout_s": 0
+    },
+    "fixtures_fingerprint": "c96f5d6ae55c5b51",
+    "fixture_count": 109,
+    "fixtures_bound": 109,
+    "warnings": [],
+    "fixed_fields": [
+      "trader",
+      "rules_in_prompt",
+      "model_id",
+      "model_temperature",
+      "cases_per_type",
+      "injection_types",
+      "budget",
+      "price_deviation_threshold",
+      "max_position_pct",
+      "duplicate_time_window_seconds",
+      "max_orders_per_day",
+      "max_order_notional"
+    ],
+    "note": "跨模型比较须固定上述字段；本报告只统计单一 model_id，不同模型结果不得合并"
+  },
+  "summary": {
+    "violation_rate_baseline": 0.3528,
+    "violation_rate_with_checks": 0.0,
+    "blocked_count": 126,
+    "duplicate_count_with_checks": 0,
+    "duplicate_count_without_checks": 115,
+    "refusal_count": 233,
+    "correct_refusal_count": 79,
+    "duplicate_rate_with_checks": 0.0,
+    "duplicate_rate_without_checks": 0.3194,
+    "false_pass_count_with_checks": 0,
+    "false_pass_count_without_checks": 11,
+    "false_pass_rate_with_checks": 0.0,
+    "false_pass_rate_without_checks": 0.1222,
+    "over_conservative_count_with_checks": 0,
+    "over_conservative_count_without_checks": 0,
+    "over_conservative_rate_with_checks": 0.0,
+    "over_conservative_rate_without_checks": 0.0,
+    "quote_unavailable_events": 90
+  },
+  "effect_size": {
+    "arr": 0.3528,
+    "rrr": 1.0,
+    "nnt": 2.83
+  },
+  "value_assessment": {
+    "verdict": {
+      "verdict": "positive",
+      "reason": "layer_reduces_violations_significantly",
+      "significant": true,
+      "p_value": 5.069e-29,
+      "actionable": true,
+      "note": "校验层显著降低了违反率（ARR=0.3528，p=5.069e-29）"
+    },
+    "decision_changes": {
+      "total": 126,
+      "by_action": {
+        "sell→hold": 65,
+        "buy→hold": 61
+      },
+      "by_injection_type": {
+        "duplicate": 80,
+        "prompt_perturb": 15,
+        "missing_quote": 11,
+        "timeout_retry": 20
+      },
+      "avoided_consequences": {
+        "max_order_notional": 65,
+        "limit_up_down": 32,
+        "duplicate_order": 31,
+        "position_limit": 4,
+        "suspended_filter": 20,
+        "quote_required": 11
+      },
+      "suppressed_qty": 56900,
+      "note": "统计被校验层改写的委托数量及其避免的违规类型；suppressed_qty 为被拦下的委托股数合计"
+    },
+    "effect_size": {
+      "arr": 0.3528,
+      "rrr": 1.0,
+      "nnt": 2.83
+    },
+    "confidence_intervals": {
+      "baseline_hard_violation_rate": {
+        "point": 0.3528,
+        "lower": 0.3052,
+        "upper": 0.4035
+      },
+      "with_checks_hard_violation_rate": {
+        "point": 0.0,
+        "lower": 0,
+        "upper": 0.0106
+      }
+    },
+    "mcnemar_test": {
+      "contingency_table": {
+        "both_violate": 0,
+        "only_without": 127,
+        "only_with": 0,
+        "neither": 233
+      },
+      "pairing_basis": "hard_violations",
+      "discordant_pairs": 127,
+      "chi2": 125.0079,
+      "p_value": 5.069e-29,
+      "p_value_asymptotic": 5.069e-29,
+      "p_value_exact": 1.175e-38,
+      "test_used": "chi2_continuity_correction",
+      "exact_max_discordant": 100,
+      "significant_at_005": true,
+      "interpretation": "校验层阻断了 127 条违反，未引入新违反 0 条"
+    }
+  },
+  "applicability": {
+    "constraint_coverage": [
+      "min_lot_size",
+      "settlement_cycle",
+      "limit_up_down",
+      "suspended_filter",
+      "st_filter",
+      "force_close_window",
+      "position_limit",
+      "capital_check",
+      "quote_required",
+      "duplicate_order",
+      "max_orders_per_day",
+      "max_order_notional"
+    ],
+    "soft_constraints": [
+      "price_deviation"
+    ],
+    "in_scope": [
+      "执行安全：是否违反已实现的交易约束",
+      "校验层增量价值：有/无校验层的违反率差异",
+      "异常输入下的鲁棒性：四类故障注入"
+    ],
+    "out_of_scope": [
+      "策略收益能力：本工具不产生交易信号，不评估盈利能力",
+      "真实市场微观结构：全程回放，不模拟流动性冲击、撮合排队、滑点",
+      "未实现的约束：业务若有第 13 条硬约束，需自行扩展约束判定器",
+      "合规审查：规则级检查不替代合规与风控审查"
+    ],
+    "invalid_when": [
+      "trader=stub 时结论无效：桩件固定返回 hold，violation_rate=0 仅证明链路可运行",
+      "config_hash 不一致时跨模型比较无效",
+      "cases_per_type 过小时结论可能不显著",
+      "委托上限未设置时（max_orders_per_day=8、max_order_notional=50000.0）不对应约束做判定"
+    ],
+    "requires": {
+      "trader": "sut",
+      "model_id": "sut-trader",
+      "live_trading_access": false
+    }
+  }
+}

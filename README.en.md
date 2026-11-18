@@ -241,7 +241,7 @@ if parse_error_rate > 0.2:
 
 If you see `verdict.reason == "high_parse_error_rate"`, fix the prompt or raise `max_tokens` before reading the numbers.
 
-**② Cost.** Each case is invoked twice (clean input for over-conservative detection + perturbed input). With `cases_per_type=30` and four injection types that is 180 events ≈ 360 calls. Smoke-test small first:
+**② Cost.** The engine invokes the system under test once per event; the extra clean-input reference call used to detect over-conservatism is **cached per distinct position**, not once per event. So the default `cases_per_type=30` across four injection types — 180 events — has an upper bound of roughly `180 + 109 = 289` calls (fewer when repeats share a position), **not 360**. Smoke-test small first:
 
 ```bash
 CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=llm python3 scripts/build.py

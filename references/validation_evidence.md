@@ -114,6 +114,37 @@ CONSTRAINT_TRADER=sut python3 scripts/build.py
 
 ---
 
+## 2ter. 判别臂：`trader=sut` 规则引擎（v0.4.0，随包固化）
+
+§2bis 那一轮（宿主 agent 作答）说明了一件事：**被测系统本身守规时，校验层没有东西可拦**，
+`inconclusive` 是诚实上限，不能读成「校验层无用」。要证明判定器有区分度，必须换一档
+**会真实犯错**的被测系统。这里用内置规则引擎 `sut`（只看浮盈亏阈值就下单，不看涨跌停、
+停牌、T+1、资金与仓位约束）：
+
+| 项 | 值 |
+|---|---|
+| 配置 | `trader=sut`、`cases_per_type=60`、`max_orders_per_day=8`、`max_order_notional=50000` |
+| 事件数 | 360 |
+| 基线违反率 → 校验后 | **35.28% → 0%**（拦下 126 笔） |
+| McNemar | 不一致对 127（`only_without 127 / only_with 0`），走渐进 χ²（127 > 100 阈值） |
+| p | 渐进 **5.069e-29**、精确二项 **1.175e-38** |
+| 效应量 | ARR **0.3528**、RRR 1.0、NNT 2.83 |
+| verdict | **`positive`**（`layer_reduces_violations_significant`） |
+| 夹具 | 载入 109、实际绑定 109 |
+| 固化锚点 | `baselines/sut_discriminative.json`；实际产物 `output/report_sut_discriminative.json` |
+
+两条臂合起来才是这套评测的完整结论：**判定器有真实区分度**（同一套夹具、同一套阈值，
+守规臂判 `inconclusive`、犯错臂判 `positive`），而不是「加一层就归零」的自证。
+`max_orders_per_day` / `max_order_notional` 必须显式设置才参与判定（默认 null＝不限制），
+这也是 v0.3.0 之前 `config_hash` 不含它们会造成误判的原因。
+
+### p 值显示口径（v0.4.0 修正）
+
+`round(p, 6)` 会把 `1e-38` 这类极小值压成 `0.0`，读者会误读成「p 恰好等于 0」。
+现统一按 4 位有效数字输出（`5.069e-29` / `1.175e-38`），并有锚定用例。
+
+---
+
 ## 3. 冻结基线可比性
 
 两轮仅 `rules_in_prompt` 不同：

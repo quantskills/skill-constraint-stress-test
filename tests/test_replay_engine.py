@@ -201,7 +201,7 @@ class TestMcNemarTest:
         assert result["contingency_table"]["only_with"] == 0
         # 精确：2·P(X=5|n=5,p=.5) = 2/32；渐进：erfc(sqrt(3.2/2))
         assert result["p_value_exact"] == pytest.approx(0.0625, abs=1e-6)
-        assert result["p_value_asymptotic"] == pytest.approx(0.073638, abs=1e-6)
+        assert result["p_value_asymptotic"] == pytest.approx(0.073638, abs=1e-5)
         assert result["test_used"] == "exact_binomial"
         assert result["p_value"] == result["p_value_exact"]
         assert result["significant_at_005"] is False
@@ -213,11 +213,11 @@ class TestMcNemarTest:
         result = _mcnemar_test(with_checks, without)
         chi2 = (abs(8 - 0) - 1) ** 2 / 8
         assert result["p_value_asymptotic"] == pytest.approx(
-            math.erfc(math.sqrt(chi2 / 2)), abs=1e-6
+            math.erfc(math.sqrt(chi2 / 2)), rel=1e-3
         )
         # 直接对账函数本身：渐进值必须等于 χ²₁ 生存函数，而不是它的一半
         _, p_asym, _ = _mcnemar_p_values(8, 0)
-        assert p_asym == pytest.approx(0.013328, abs=1e-6)
+        assert p_asym == pytest.approx(0.013328, abs=1e-5)
 
     def test_exact_p_hand_computed_cases(self):
         # b=10, c=0 → 2·(1/2)^10
@@ -239,6 +239,18 @@ class TestMcNemarTest:
         assert result["discordant_pairs"] == 0
         assert result["p_value"] == 1.0
 
+
+    def test_tiny_p_is_not_reported_as_exact_zero(self):
+        """b=127,c=0 时精确 p≈1e-38；必须显示成非零有效数字，不能压成 0.0。"""
+        n = 127
+        without = [self._ev(["x"])] * n + [self._ev([])] * n
+        with_checks = [self._ev([])] * (2 * n)
+        result = _mcnemar_test(with_checks, without)
+        assert result["p_value"] > 0, "极小 p 被压成 0.0，读者会误读为「恰好为 0」"
+        assert result["p_value"] < 1e-20
+        # 127 > _MCNEMAR_EXACT_MAX_DISCORDANT，走渐进检验：p 量级 ~1e-29，
+        # 若断言成精确检验的 ~1e-38 就把判定规则写死了，这里只锁「非零且极小」
+
     def test_large_discordant_count_uses_asymptotic(self):
         n = _MCNEMAR_EXACT_MAX_DISCORDANT + 5
         without = [self._ev(["x"])] * n + [self._ev([])] * n
@@ -257,3 +269,4 @@ class TestConfidenceInterval:
     def test_normal(self):
         ci = _confidence_interval(5, 100)
         assert 0 < ci["lower"] < ci["point"] < ci["upper"] < 1
+

@@ -225,7 +225,7 @@ if parse_error_rate > 0.2:
 
 看到 `verdict.reason == "high_parse_error_rate"`，先修提示词或调大 `max_tokens`，别急着解读数字。
 
-**② 成本。** 引擎对每个案例调用两次（干净输入 + 扰动输入），前者用于判定「过度保守」。默认 `cases_per_type=30`、四类注入 = 180 个事件 ≈ 360 次调用。先调小跑通：
+**② 成本。** 引擎对每个事件调用一次被测系统；判定「过度保守」还需要一次干净输入参考调用，但它**按不同持仓去重缓存**，不是每事件两次。因此默认 `cases_per_type=30`、四类注入产生的 180 个事件，上界约 `180 + 109 = 289` 次调用（重复注入共享同一持仓时更少），**不是 360**。先调小跑通：
 
 ```bash
 CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=llm python3 scripts/build.py

@@ -1,3 +1,22 @@
+## [0.4.0] — 2026-11-19
+
+### Added
+- **判别臂运行随包固化**：`trader=sut`（会真实犯错）在 `cases_per_type=60` +
+  `max_orders_per_day=8` + `max_order_notional=50000` 下：**35.28% → 0%**、拦下 126 笔、
+  不一致对 127、渐进 p `5.069e-29`（精确 `1.175e-38`）、`verdict=positive`、
+  ARR 0.3528 / RRR 1.0 / NNT 2.83。锚点 `baselines/sut_discriminative.json`，
+  产物 `output/report_sut_discriminative.json`，说明见 `references/validation_evidence.md` §2ter。
+  与 §2bis 的宿主 agent 守规臂（`inconclusive`）合起来构成**区分度证据**：
+  同一套夹具与阈值，守规臂不判 positive、犯错臂判 positive——不是「加一层就归零」的自证。
+
+### Fixed
+- **极小 p 被显示成 `0.0`**：报告用 `round(p, 6)`，`1e-38` 量级会被压成 `0.0`，
+  读者会误读成「p 恰好为 0」。改为 4 位有效数字输出，并加锚定用例。
+- **调用数声明不实**：README 中/英原写「180 事件 ≈ 360 次调用」，实际干净输入参考调用
+  **按不同持仓去重缓存**，不是每事件两次；真实上界约 `180 + 109 = 289` 次。已按实现改写。
+
+---
+
 ## [0.3.3] — 2026-11-19
 
 ### Fixed

@@ -507,9 +507,11 @@ def _mcnemar_test(events_with: list[dict], events_without: list[dict]) -> dict[s
         "pairing_basis": "hard_violations",
         "discordant_pairs": b + c,
         "chi2": round(chi2, 4),
-        "p_value": round(p_value, 6),
-        "p_value_asymptotic": round(p_asym, 6),
-        "p_value_exact": round(p_exact, 6),
+        # p 用 4 位有效数字而非 round(.,6)：b=127,c=0 时精确 p≈1.2e-38，
+        # 六位小数会压成 0.0，读者会误读成「p 恰好为 0」。
+        "p_value": float(f"{p_value:.4g}"),
+        "p_value_asymptotic": float(f"{p_asym:.4g}"),
+        "p_value_exact": float(f"{p_exact:.4g}"),
         "test_used": "exact_binomial" if use_exact else "chi2_continuity_correction",
         "exact_max_discordant": _MCNEMAR_EXACT_MAX_DISCORDANT,
         "significant_at_005": p_value < 0.05,

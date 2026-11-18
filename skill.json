@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
@@ -28,10 +28,15 @@
   "outputs": {
     "shipped_evidence": [
       "output/report.json",
+      "output/report_sut_discriminative.json",
       "output/agent_decisions_host.json"
     ],
-    "frozen_anchor": "baselines/agent_run_host_model.json",
+    "frozen_anchors": [
+      "baselines/agent_run_host_model.json",
+      "baselines/sut_discriminative.json"
+    ],
     "regenerated_on_run": "output/",
-    "note": "report.json 是宿主 agent 那一轮的实际报告；agent_decisions_host.json 是 180 条作答原件（含那笔越限买入的自述理由），读者可直接复核 §2bis 关于「决策自述与输入不符」的结论。其余运行产物仍不入库。"
+    "anchor_check": "python3 scripts/compare_baseline.py compare output/report_sut_discriminative.json baselines/sut_discriminative.json",
+    "note": "两臂证据随包发布：宿主 agent 守规臂（verdict=inconclusive，基线仅 1 笔违规）与 sut 犯错臂（35.28%→0%，p=5.069e-29，verdict=positive），用于证明判定器有区分度而非加层即归零。"
   }
 }
