@@ -16,6 +16,10 @@ Evaluation skill for AI traders. Constructs abnormal-input scenarios, replays th
 
 ## Quick start
 
+Run the pre-flight checklist in `SKILL.md` (`## 前置检查`) first. If an item fails,
+stop and report what is missing -- do not switch data sources, do not let a stub run be
+reported as AI-trader behaviour.
+
 ```bash
 # Install test dependencies
 pip install -r requirements-dev.txt
@@ -50,7 +54,31 @@ python3 scripts/run_eval.py --cases-dir fixtures/ --output-dir output/
 
 - Python 3.10+
 - PyYAML (optional; falls back to built-in defaults)
-- panda-data==1.0.6 (fixture generation only)
+- Runtime and data live on the QuantStudio host. Data is fetched by the agent through PandaData MCP.
+  (`mcp__pandadata__call_pandadata`) and saved as JSON; `scripts/fixture_generator.py --from-mcp`
+  consumes it. Evaluation runs fully offline on the shipped fixtures.
+
+## Data acquisition (MCP only)
+
+Register the `pandadata` MCP server (Streamable HTTP,
+`https://pandadatamcp.pandaaiquant.com/mcp`, OAuth login) and call, in order:
+
+```
+mcp__pandadata__auth_status({})
+mcp__pandadata__get_method_doc({"method": "get_suspended_list"})
+mcp__pandadata__call_pandadata({
+  "method": "get_suspended_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_suspended": true},
+  "preview_rows": 2000
+})
+```
+
+Methods used: `get_suspended_list`, `get_st_list`, `get_trade_list`, `get_stock_daily`.
+Save each response as JSON, then run
+`python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110`.
+
+Never put credentials in code or docs; never treat `truncated: true` results as complete —
+fetch in narrower date ranges.
 
 ## Notes
 

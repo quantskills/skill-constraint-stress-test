@@ -7,6 +7,41 @@ license: GPL-3.0-only
 
 # AI 交易员约束压力测试与故障注入回放
 
+## 前置检查（未通过就停：只报告缺什么，不加载后续流程）
+
+本技能运行在 **QuantStudio** 环境：解释器、被测模型与数据通道都由宿主提供。行情与标的状态
+一律由**阅读本 skill 的 AI** 调用 **PandaData MCP** 取回并落盘为 JSON，
+`scripts/fixture_generator.py --from-mcp` 只读落盘文件；评测执行阶段完全离线，
+不联网、不读凭证，skill 内不含任何账号、密码、token 或服务地址。
+
+执行任何流程之前按顺序确认下列各项，**任一不过即停止**，且只输出「缺什么 + 怎么补」，
+不得产出任何指标、不得改用其他数据源、不得静默降级：
+
+1. **运行环境**：QuantStudio 宿主内 Python ≥ 3.10（自检项 `python_version`，不过为
+   blocked）。
+2. **依赖**：评测链路**只用标准库**（`requirements.txt` 声明无三方依赖），`pyyaml`
+   缺失只是 warn（回退内置默认参数）。需要三方包的只有**验收测试**：`import pytest` 通过即可。
+3. **要新数据时（生成/更新夹具）——MCP 会话是阻塞项**：
+   - `mcp__pandadata__auth_status` 须 `ok: true` 且 `reauth_required: false`。
+     不过 → 告知用户在 QuantStudio 宿主的 Settings → PandaData 完成 OAuth 登录；
+     不重试登录、不索要密码。
+   - 权限探针：先调一次最小 `get_trade_list`（单个交易日）。返回
+     `data_permission_required` → 停止并原样转述 message 与购买入口，不换源重试。
+   - 每次 `call_pandadata` 必须核对 `truncated` 与 `row_count < total_rows`
+     （实测 240 行只回 180 行），截断没处理完不得生成夹具。
+4. **用既有夹具评测时——MCP 不是阻塞项**：`fixtures_dir` 存在即可跑（`env_check` 的
+   `mcp_data_source` 恒为 ok，这是设计如此，不是漏检），`config_file` 缺失只 warn。
+   但报告必须写明夹具来源与生成日期：109 个夹具里只有 26 个由真实数据衍生（数值仍为构造），
+   其余为手工边界值，**不得**说成真实成交结果。
+5. **被测系统（SUT）**：默认 `trader=stub` 固定返回 hold，只能证明链路可运行，
+   `verdict` 必须为 `inconclusive`，**不得**输出 positive，也不得写成「AI 交易员守住了约束」。
+   接真实模型时端点与密钥由宿主（QuantStudio）环境注入（`CONSTRAINT_LLM_BASE_URL` /
+   `CONSTRAINT_LLM_API_KEY`，未设时回退读宿主已有的 `ANTHROPIC_AUTH_TOKEN`）：本包不写死
+   任何端点地址或密钥值，也不把密钥写进报告；温度必须为 0，
+   对照臂与实验臂的夹具集/注入类型/案例数/阈值/预算必须一致，否则 `config_hash` 判不可比。
+
+另需确认评测全程不触碰实盘：本 skill 只做回放与模拟，禁止为触发场景真实下单。
+
 ## 工具定位
 - 工具类型：评测工具型
 - 工程形态：工程型（通用工具类）
@@ -66,29 +101,153 @@ python3 scripts/compare_baseline.py list
 
 `config_hash` 一致才标 `comparable: true` 并给出 delta；否则列出 `changed_fields` 并明确标注 delta 不可解读。`config_hash` 已计入 `trader`、`model_id`、温度、案例数、注入类型、预算与全部判定阈值。
 
-## 数据接口（PandaAI data）
-| 接口 | 用途 | 关键字段 |
-|---|---|---|
-| `get_suspended_list` | 获取停牌标的列表 | symbol, date |
-| `get_st_list` | 获取 ST 标的列表 | symbol, date |
-| `get_stock_daily` | 获取日线数据构造涨跌停场景 | symbol, close, high, low |
-| `get_trade_cal` | 获取交易日历 | exchange, date |
-| `get_trade_list` | 获取在售股票列表 | date |
+## 数据获取（PandaData MCP）
 
-> 字段详见 `references/api_guide.md`。仅在夹具生成阶段使用，评测执行阶段不调用。
+本 skill 运行在 **QuantStudio** 环境，不自带任何取数组件与凭证。数据由阅读本 skill 的 AI 通过 **PandaData MCP** 取回，落盘为 JSON 后交给脚本。评测执行阶段完全离线。
+
+### MCP 连接
+
+| 项 | 值 |
+|---|---|
+| 服务器名 | `pandadata` |
+| 传输 | Streamable HTTP |
+| 地址 | `https://pandadatamcp.pandaaiquant.com/mcp` |
+| 认证 | OAuth，由用户在 QuantStudio 宿主侧登录 |
+| 凭证 | **skill 中不出现任何账号、密码、token**；登录由客户端 OAuth 完成 |
+
+模型可见的工具名（Claude Code 形态）：
+
+| 工具 | 用途 |
+|---|---|
+| `mcp__pandadata__auth_status` | 先确认已登录 |
+| `mcp__pandadata__search_methods` | 按关键词找方法名 |
+| `mcp__pandadata__get_method_doc` | 确认参数签名与返回列 |
+| `mcp__pandadata__call_pandadata` | 实际取数 |
+
+### 调用顺序
+
+```
+auth_status → search_methods → get_method_doc → call_pandadata
+```
+
+`call_pandadata` 参数：
+
+```json
+{"method": "get_suspended_list", "params": {"start_date": "20251110", "end_date": "20251110"}, "preview_rows": 2000}
+```
+
+`preview_rows` 取值 0–2000，**只控制本地预览行数，不控制网关取数**。
+
+### 数据需求 → 方法对照
+
+| 数据需求 | MCP 方法 | 参数 | 返回形态 |
+|---|---|---|---|
+| 停牌标的 | `get_suspended_list` | `start_date`(必填), `end_date`(必填), `is_suspended`(可选), `symbol`(可选) | dataframe：`symbol,date,is_suspended` |
+| ST 标的 | `get_st_list` | `start_date`(必填), `end_date`(必填), `is_st`(可选), `symbol`(可选) | dataframe：`symbol,date,is_st` |
+| 在售股票列表 | `get_trade_list` | `date`(必填), `exchange`(可选) | 列表 `[{date,symbol}, ...]` |
+| 日线（构造涨跌停） | `get_stock_daily` | `symbol`(list), `start_date`(必填), `end_date`(必填), `fields`(可选), `indicator`, `st` | dataframe：`date,symbol,open,high,low,close,pre_close,volume,amount,limit_up,limit_down,trade_status,name` |
+
+### 返回信封
+
+`call_pandadata` 外层信封：
+
+```json
+{"ok": true, "method": "get_trade_list", "params": {}, "result": ..., "request_id": "..."}
+```
+
+`result` 有两种形态，`scripts/mcp_source.py` 都支持：
+
+1. **表格型**：`{"type":"dataframe","columns":[...],"rows":[[...]],"row_count":N,"total_rows":N,"truncated":bool,"truncation_reasons":["byte_limit"|"row_limit"]}`
+2. **普通列表/字典**：如 `get_trade_list` → `[{"date":"20251110","symbol":"000001.SZ"}, ...]`；`get_prev_trade_date` → `{"date":"20251107"}`
+
+### ⚠️ 截断必须处理
+
+网关会截断结果（实测 240 行的分钟线只回了 180 行，`truncation_reasons: ["byte_limit"]`）。因此：
+
+- **按窄日期区间 / 小批次标的**分批取数，每批单独落盘
+- 结果 `truncated: true` 时，`mcp_source.py` 会抛 `MCPError(code="mcp_truncated")` 并提示分批
+- **绝不能**把截断结果当完整数据静默使用，那会悄悄改变评测结论
+
+### 落盘约定
+
+把每个 `call_pandadata` 的**完整响应**保存为 JSON，文件名对应方法：
+
+```
+mcp_exports/
+├── suspended.json     ← get_suspended_list 的响应
+├── st.json            ← get_st_list 的响应
+├── trade_list.json    ← get_trade_list 的响应
+└── stock_daily.json   ← get_stock_daily 的响应（可分片：stock_daily_2025.json）
+```
+
+也接受单文件多方法（键为方法短名）或信封数组，详见 `references/data_access.md`。
+
+### 完整调用示例
+
+**第 1 步：确认登录**
+
+```
+mcp__pandadata__auth_status({})
+```
+
+**第 2 步：查方法文档**
+
+```
+mcp__pandadata__get_method_doc({"method": "get_suspended_list"})
+```
+
+**第 3 步：取停牌列表**
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_suspended_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_suspended": true},
+  "preview_rows": 2000
+})
+```
+
+**第 4 步：取交易列表**
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_trade_list",
+  "params": {"date": "20251110"},
+  "preview_rows": 2000
+})
+```
+
+**第 5 步：取日线（symbol 显式列出，窄区间）**
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_stock_daily",
+  "params": {
+    "symbol": ["000001.SZ", "000407.SZ", "000851.SZ"],
+    "start_date": "20251110",
+    "end_date": "20251110",
+    "fields": ["open", "high", "low", "close", "pre_close"]
+  },
+  "preview_rows": 2000
+})
+```
+
+**第 6 步：把响应落盘并生成夹具**
+
+```bash
+python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
+```
 
 ### 凭证与数据来源
 
-| 阶段 | 是否需要凭证 |
-|---|---|
-| 夹具生成（`scripts/fixture_generator.py`） | 需要 `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL` |
-| 评测执行（`scripts/build.py` 等） | **不需要**，只读本地 fixture |
-
-凭证只从环境变量或 `~/.pandadata/pandadata.env` 读取，任何情况下不写入仓库。
+| 阶段 | 数据从哪来 | 是否需要凭证 |
+|---|---|---|
+| MCP 取数（agent 侧） | `mcp__pandadata__call_pandadata` | 用户 OAuth 登录，skill 内不存凭证 |
+| 夹具生成（`scripts/fixture_generator.py`） | 只读 `--from-mcp` 指向的本地 JSON | **不需要** |
+| 评测执行（`scripts/build.py` 等） | 只读本地 `fixtures/` | **不需要** |
 
 `fixtures/generated/` 共 109 个：26 个由真实数据衍生（代码真实、数值构造，带 `_source: pandadata_*`），83 个为手工合成边界值。**clone 后无需凭证即可运行。**
 
-详见 `references/data_access.md`。
+详见 `references/data_access.md` 与 `references/api_guide.md`。
 
 ## 术语约定
 - **硬约束**：违反即事故的规则（最小交易单位、T+1、涨跌停禁单、停牌/ST 过滤、仓位上限、强平时间窗、**缺行情禁单、重复委托禁单、单日委托笔数上限、单笔委托金额上限**）
@@ -111,7 +270,7 @@ python3 scripts/compare_baseline.py list
 - 评测全程基于**本地 fixture / 历史数据回放**，不连接实盘账户、真实交易网关或生产委托通道
 - **禁止为了触发某个测试场景而真实下单**——可以构造假输入，不可以制造真委托
 - `fixtures/` 为只读；`trader_fn` 只返回决策 dict，返回值不得被执行
-- 夹具生成阶段（`scripts/fixture_generator.py`）只读行情，不下单
+- 夹具生成阶段只读 MCP 取回的行情导出（`--from-mcp`），脚本本身不联网、不下单
 
 ### 预算固定
 
@@ -220,10 +379,10 @@ python scripts/env_check.py --self-check --json
 # 契约校验
 python scripts/validate.py output/events_with_checks.jsonl --json
 
-# 夹具生成（需要 pandadata 凭证）
-python scripts/fixture_generator.py --date 20250115
+# 夹具生成：先用 MCP 取数并落盘，再转换（脚本本身不联网）
+python scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20250115
 
-# 仅手工夹具
+# 仅手工夹具（无需任何数据）
 python scripts/fixture_generator.py --manual-only
 ```
 
@@ -294,7 +453,8 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 ## 平台特殊处理清单
 - [x] macOS / Windows / Linux 路径兼容（使用 `Path(__file__).resolve().parents[1]`）
 - [x] 缺 pyyaml 时优雅降级到内置默认值
-- [x] 缺 panda_data 时 warn 而非 blocked（仅夹具生成需要）
+- [x] 运行环境与数据都在 QuantStudio 侧：取数走 agent 侧 MCP（`mcp__pandadata__call_pandadata`），skill 内零凭证；env_check 的数据源项恒为 ok，离线评测不因 MCP 缺失而阻塞
+- [x] MCP 结果 `truncated=true` 时结构化报错并要求分批，不静默使用截断数据
 - [x] CI 环境无网络时仍可运行 pytest（重依赖由桩件替代）
 - [x] 脱离 agent 环境时 `python scripts/run_eval.py` 可独立运行
 
@@ -312,7 +472,7 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 - `compare_baseline.py` 在 `config_hash` 不一致时必须标 `comparable: false` 并列出差异字段
 - `python scripts/validate.py` 对合法 JSONL 返回 0，对畸形文件返回非 0
 - CI 含负路径反向断言（stdout 纯 JSON、自检如实报告 blocked、校验器拒畸形产物）
-- 引用的测试文件全部真实存在：`test_constraints_evaluator.py`、`test_injector.py`、`test_market_rules.py`、`test_replay_engine.py`、`test_validate.py`、`test_metrics.py`、`test_compare_baseline.py`、`test_llm_trader.py`
+- 引用的测试文件全部真实存在：`test_constraints_evaluator.py`、`test_injector.py`、`test_market_rules.py`、`test_replay_engine.py`、`test_validate.py`、`test_metrics.py`、`test_compare_baseline.py`、`test_llm_trader.py`、`test_mcp_source.py`
 
 ## 已知局限
 - 当前使用默认桩件 trader（返回 hold），需注入真实被测系统（如日内仓位管理 skill）才能评测实际约束守持
@@ -327,5 +487,5 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 ## 依赖
 - Python >=3.10
 - PyYAML（可选，缺时降级到内置默认值）
-- panda-data==1.0.6（仅夹具生成阶段需要，评测执行不需要）
-- 数据源：PandaAI data（仅夹具生成）+ 调用方传入的本地 fixture（评测执行）
+- **零第三方数据依赖**：数据由 agent 通过 PandaData MCP（`mcp__pandadata__call_pandadata`）获取并落盘，`scripts/mcp_source.py` 与 `scripts/fixture_generator.py` 均为纯标准库
+- 数据源：PandaData MCP（仅取数/再生夹具阶段）+ 本地 fixture（评测执行阶段）

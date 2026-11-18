@@ -58,29 +58,19 @@ def _check_pyyaml() -> CheckItem:
         )
 
 
-def _check_panda_data() -> CheckItem:
-    """panda_data 仅夹具生成阶段需要，评测执行不需要。"""
-    try:
-        from importlib.metadata import version
+def _check_mcp_source_note() -> CheckItem:
+    """运行与取数都在 QuantStudio 环境：数据由 agent 通过 PandaData MCP 取回落盘，本 skill 执行阶段只读本地 fixture。
 
-        ver = version("panda-data")
-        if ver == "1.0.6":
-            return CheckItem("panda_data", "ok", found=f"v{ver}")
-        return CheckItem(
-            "panda_data",
-            "warn",
-            found=f"v{ver}",
-            expected="1.0.6",
-            hint="pip install panda-data==1.0.6  (only needed for fixture generation)",
-        )
-    except Exception:
-        return CheckItem(
-            "panda_data",
-            "warn",
-            found="not installed",
-            expected="1.0.6 (fixture generation only)",
-            hint="pip install panda-data==1.0.6  (only needed for fixture generation)",
-        )
+    这里刻意**不联网、不探测 MCP**：离线评测不需要 MCP，缺失也不构成阻塞；
+    需要重新取数时由 SKILL.md 的「前置检查」拦下。
+    """
+    return CheckItem(
+        "mcp_data_source",
+        "ok",
+        found="QuantStudio host: agent-side MCP (mcp__pandadata__call_pandadata)",
+        expected="agent acquires data; skill reads local fixtures only",
+        hint="Data comes from MCP tool calls made by the reading agent; this skill never calls the network.",
+    )
 
 
 def _check_fixtures_dir() -> CheckItem:
@@ -118,11 +108,15 @@ def run_self_check() -> dict:
         ),
         CheckGroup(
             "dependencies",
-            [_check_pyyaml(), _check_panda_data()],
+            [_check_pyyaml()],
+        ),
+        CheckGroup(
+            "data_access",
+            [_check_mcp_source_note(), _check_fixtures_dir()],
         ),
         CheckGroup(
             "resources",
-            [_check_fixtures_dir(), _check_config_file()],
+            [_check_config_file()],
         ),
     ]
 

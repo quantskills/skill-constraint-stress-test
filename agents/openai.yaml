@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: skill-constraint-stress-test
   description: AI trader constraint stress test and fault-injection replay. Injects duplicate input, prompt perturbation, missing quotes, and timeout/retry faults, then replays decisions with and without a constraint-validation layer to report violation rate, duplicate-action rate, refusal count, and ARR/RRR/NNT effect sizes.
-  version: 0.1.0
+  version: 0.2.0
 
 x-skill-info:
   name: skill-constraint-stress-test
@@ -35,9 +35,42 @@ x-steps:
 
   - id: generate_fixtures
     script: scripts/fixture_generator.py
-    description: Regenerate evaluation fixtures (requires panda_data credentials)
-    args: "--date 20250115"
-    auth_required: true
+    description: Convert PandaData MCP export JSON into evaluation fixtures (the script itself never goes online)
+    args: "--from-mcp mcp_exports/ --date 20251110"
+    auth_required: false
+
+x-preflight:
+  # Mirror of the "## 前置检查" section in SKILL.md. Work through it in order and
+  # stop at the first failing item: report only what is missing, never switch data
+  # sources and never degrade silently.
+  host: QuantStudio
+  stop_on_failure: true
+  items:
+    - id: runtime
+      check: "QuantStudio host with Python >= 3.10 (env_check item python_version)"
+      on_fail: stop
+    - id: dependencies
+      check: "evaluation path is standard-library only; tests need `import pytest`"
+      on_fail: stop
+    - id: mcp_session
+      check: "mcp__pandadata__auth_status -> ok: true and reauth_required: false"
+      blocking_when: "generating or refreshing fixtures"
+      on_fail: "stop; tell the user to log in via Settings -> PandaData; never ask the user for credentials"
+    - id: permission_probe
+      check: "one minimal get_trade_list call; data_permission_required means stop"
+      blocking_when: "generating or refreshing fixtures"
+      on_fail: "relay the returned message and purchase entry point verbatim"
+    - id: truncation
+      check: "handle truncated / row_count < total_rows before writing any fixture"
+      blocking_when: "generating or refreshing fixtures"
+      on_fail: stop
+    - id: offline_evaluation
+      check: "fixtures/ present; mcp_data_source stays ok by design"
+      blocking_when: null
+      on_fail: "state the fixture source and generation date; built-in numbers are constructed, not fills"
+    - id: subject_under_test
+      check: "trader=stub proves the pipeline only; temperature 0 and identical comparability fields"
+      on_fail: "verdict must stay inconclusive; never report it as AI-trader behaviour"
 
 x-injection-types:
   - duplicate
@@ -74,12 +107,37 @@ x-evaluation-policy:
     - id: stub-trader
       role: subject
 
+x-mcp-source:
+  server: pandadata
+  transport: streamable-http
+  url: https://pandadatamcp.pandaaiquant.com/mcp
+  auth: oauth
+  tools:
+    - mcp__pandadata__auth_status
+    - mcp__pandadata__search_methods
+    - mcp__pandadata__get_method_doc
+    - mcp__pandadata__call_pandadata
+  call_order: [auth_status, search_methods, get_method_doc, call_pandadata]
+  call_pandadata_params: {method: "<get_* method>", params: {}, preview_rows: 2000}
+  methods:
+    - method: get_suspended_list
+      params: [start_date, end_date, is_suspended, symbol]
+      returns: "dataframe: symbol,date,is_suspended"
+    - method: get_st_list
+      params: [start_date, end_date, is_st, symbol]
+      returns: "dataframe: symbol,date,is_st"
+    - method: get_trade_list
+      params: [date, exchange]
+      returns: "list: [{date, symbol}]"
+    - method: get_stock_daily
+      params: [symbol, start_date, end_date, fields, indicator, st]
+      returns: "dataframe: date,symbol,open,high,low,close,pre_close,volume,amount,limit_up,limit_down,trade_status,name"
+  truncation_policy: "truncated=true must be rejected; fetch in narrower date ranges via scripts/mcp_source.py"
+
 x-requirements:
   runtime: python >= 3.10
   packages:
     - pyyaml (optional)
     - pytest (dev)
-    - panda-data==1.0.6 (fixture generation only)
-  env:
-    - PANDA_DATA_USERNAME
-    - PANDA_DATA_PASSWORD
+  env: []
+  data_source: "PandaData MCP on the QuantStudio host (agent-side); no fetching client, no credentials"

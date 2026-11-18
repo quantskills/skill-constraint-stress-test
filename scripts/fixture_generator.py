@@ -1,8 +1,13 @@
-"""夹具生成器 — 离线调用 pandadata 生成真实分布的测试夹具。
+"""夹具生成器 — 把 MCP 取回的数据转成评测夹具。
 
-仅在夹具生成阶段使用 panda_data，评测执行阶段不调用任何外部服务。
+数据获取方式：由阅读本 skill 的 AI 调用 PandaData MCP 工具
+``mcp__pandadata__call_pandadata`` 取回数据并落盘为 JSON，本脚本只消费这些
+导出文件（``--from-mcp``），**不导入任何取数组件、不读取任何凭证、不联网**。
 
-v0.2: 修正 API 签名（date→start_date/end_date），扩充约束触发夹具覆盖。
+评测执行阶段更是完全离线：已生成的夹具随仓库发布，clone 即可运行。
+
+字段口径与 v0.2 完全一致（``fixtures/generated/*.json``），下游 replay/evaluator
+的输入契约不变。
 """
 
 from __future__ import annotations
@@ -14,162 +19,167 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-def _env_first(primary: str, fallback: str) -> str:
-    """优先读取主环境变量，缺失时回退到历史变量名。"""
-    import os
+from mcp_source import (  # noqa: E402
+    MCPError,
+    load_exports,
+    parse_st,
+    parse_stock_daily,
+    parse_suspended,
+    parse_trade_list,
+)
 
-    return os.environ.get(primary) or os.environ.get(fallback) or ""
+#: 每个类别最多落盘的夹具数（与 v0.2 保持一致）
+MAX_REAL_FIXTURES = 10
+
+#: 涨停判定容差：close 与 high 的绝对差小于该值视为封板
+LIMIT_UP_TOLERANCE = 0.02
 
 
-def _try_init_pandadata() -> Any:
-    """尝试初始化 panda_data，失败时返回 None。"""
-    try:
-        import os
-        import panda_data
-
-        username = _env_first("PANDA_DATA_USERNAME", "DEFAULT_USERNAME")
-        password = _env_first("PANDA_DATA_PASSWORD", "DEFAULT_PASSWORD")
-        base_url = _env_first("PANDA_DATA_BASE_URL", "JAVA_SERVICE_BASE_URL")
-
-        if not all([username, password, base_url]):
-            env_file = Path.home() / ".pandadata" / "pandadata.env"
-            if env_file.exists():
-                for line in env_file.read_text().splitlines():
-                    line = line.strip()
-                    if "=" in line and not line.startswith("#"):
-                        key, val = line.split("=", 1)
-                        os.environ.setdefault(key.strip(), val.strip())
-                username = _env_first("PANDA_DATA_USERNAME", "DEFAULT_USERNAME")
-                password = _env_first("PANDA_DATA_PASSWORD", "DEFAULT_PASSWORD")
-                base_url = _env_first("PANDA_DATA_BASE_URL", "JAVA_SERVICE_BASE_URL")
-
-        if not all([username, password, base_url]):
-            return None
-
-        panda_data.init_token(
-            username=username,
-            password=password,
-            base_url=base_url,
-        )
-        return panda_data
-    except Exception:
-        return None
+def _write_fixture(output_dir: Path, name: str, fixture: dict[str, Any]) -> None:
+    out_file = output_dir / name
+    out_file.write_text(json.dumps(fixture, ensure_ascii=False, indent=2))
 
 
 def generate_suspended_fixture(
-    panda_data: Any, date: str, output_dir: Path
+    exports: dict[str, list[Any]], date: str, output_dir: Path
 ) -> int:
-    """从真实数据生成停牌标的夹具。"""
+    """从 MCP 导出的停牌列表生成夹具。"""
     count = 0
-    try:
-        suspended = panda_data.get_suspended_list(start_date=date, end_date=date, is_suspended=True)
-        if suspended is not None and hasattr(suspended, "head"):
-            codes = suspended[suspended["is_suspended"] == True]["symbol"].tolist()
-            for code in codes[:10]:
-                # 停牌 + 浮亏 → B12 会尝试卖出 → 约束判定器应检出 suspended_filter
-                fixture = {
-                    "code": code,
-                    "pnl_pct": -0.02,
-                    "sellable_qty": 500,
-                    "locked_qty": 0,
-                    "price": 5.0,
-                    "available_cash": 50000,
-                    "time": "10:30",
-                    "market_id": "CN_A_STOCK",
-                    "suspended_codes": {code: True},
-                    "_source": "pandadata_suspended",
-                    "_date": date,
-                }
-                out_file = output_dir / f"suspended_{code.replace('.', '_')}_{date}.json"
-                out_file.write_text(json.dumps(fixture, ensure_ascii=False, indent=2))
-                count += 1
-    except Exception as e:
-        print(f"Warning: failed to generate suspended fixtures: {e}", file=sys.stderr)
+    for payload in exports.get("suspended", []):
+        try:
+            records = parse_suspended(payload)
+        except MCPError as e:
+            print(f"Warning: suspended export rejected: {e}", file=sys.stderr)
+            continue
+        for record in records[:MAX_REAL_FIXTURES]:
+            code = record["symbol"]
+            # 停牌 + 浮亏 → B12 会尝试卖出 → 约束判定器应检出 suspended_filter
+            fixture = {
+                "code": code,
+                "pnl_pct": -0.02,
+                "sellable_qty": 500,
+                "locked_qty": 0,
+                "price": 5.0,
+                "available_cash": 50000,
+                "time": "10:30",
+                "market_id": "CN_A_STOCK",
+                "suspended_codes": {code: True},
+                "_source": "pandadata_suspended",
+                "_date": date,
+            }
+            _write_fixture(
+                output_dir,
+                f"suspended_{code.replace('.', '_')}_{date}.json",
+                fixture,
+            )
+            count += 1
+        break  # 只用第一份（或首日分片）导出，避免重复生成
     return count
 
 
 def generate_st_fixture(
-    panda_data: Any, date: str, output_dir: Path
+    exports: dict[str, list[Any]], date: str, output_dir: Path
 ) -> int:
-    """从真实数据生成 ST 标的夹具。"""
+    """从 MCP 导出的 ST 列表生成夹具。"""
     count = 0
-    try:
-        st_list = panda_data.get_st_list(start_date=date, end_date=date, is_st=True)
-        if st_list is not None and hasattr(st_list, "head"):
-            codes = st_list[st_list["is_st"] == True]["symbol"].tolist()
-            for code in codes[:10]:
-                # ST 标的用不带 ST 前缀的真实代码，但标记为 ST
-                # B12 能识别这类代码（如 000004.SZ），约束判定器通过 is_st_or_special 检查
-                # 为了让约束判定器检出，code 需要以 ST 开头
-                st_code = f"ST{code}"
-                fixture = {
-                    "code": st_code,
-                    "pnl_pct": -0.02,
-                    "sellable_qty": 500,
-                    "locked_qty": 0,
-                    "price": 5.0,
-                    "available_cash": 50000,
-                    "time": "10:30",
-                    "market_id": "CN_A_STOCK",
-                    "_source": "pandadata_st",
-                    "_date": date,
-                    "_real_code": code,
-                }
-                out_file = output_dir / f"st_{code.replace('.', '_')}_{date}.json"
-                out_file.write_text(json.dumps(fixture, ensure_ascii=False, indent=2))
-                count += 1
-    except Exception as e:
-        print(f"Warning: failed to generate ST fixtures: {e}", file=sys.stderr)
+    for payload in exports.get("st", []):
+        try:
+            records = parse_st(payload)
+        except MCPError as e:
+            print(f"Warning: ST export rejected: {e}", file=sys.stderr)
+            continue
+        for record in records[:MAX_REAL_FIXTURES]:
+            code = record["symbol"]
+            # ST 标的用不带 ST 前缀的真实代码，但标记为 ST
+            # 为了让约束判定器检出，code 需要以 ST 开头
+            st_code = f"ST{code}"
+            fixture = {
+                "code": st_code,
+                "pnl_pct": -0.02,
+                "sellable_qty": 500,
+                "locked_qty": 0,
+                "price": 5.0,
+                "available_cash": 50000,
+                "time": "10:30",
+                "market_id": "CN_A_STOCK",
+                "_source": "pandadata_st",
+                "_date": date,
+                "_real_code": code,
+            }
+            _write_fixture(output_dir, f"st_{code.replace('.', '_')}_{date}.json", fixture)
+            count += 1
+        break
     return count
 
 
 def generate_limit_up_fixture(
-    panda_data: Any, date: str, output_dir: Path
+    exports: dict[str, list[Any]], date: str, output_dir: Path
 ) -> int:
-    """从真实日线数据中找涨停股，构造涨跌停禁单夹具。"""
+    """从 MCP 导出的交易列表 + 日线中找涨停股，构造涨跌停禁单夹具。"""
     count = 0
-    try:
-        # 取一批样本代码
-        trade_list = panda_data.get_trade_list(start_date=date, end_date=date)
-        if trade_list is None or len(trade_list) == 0:
-            return 0
-        sample_codes = trade_list["symbol"].head(50).tolist()
 
-        daily = panda_data.get_stock_daily(
-            symbol=sample_codes, start_date=date, end_date=date,
-            fields=["open", "high", "low", "close"],
-        )
-        if daily is None or len(daily) == 0:
-            return 0
+    trade_symbols: list[str] = []
+    for payload in exports.get("trade_list", []):
+        try:
+            records = parse_trade_list(payload)
+        except MCPError as e:
+            print(f"Warning: trade-list export rejected: {e}", file=sys.stderr)
+            continue
+        for record in records:
+            symbol = record["symbol"]
+            if symbol not in trade_symbols:
+                trade_symbols.append(symbol)
+        if trade_symbols:
+            break
 
-        for _, row in daily.iterrows():
-            code = str(row.get("symbol", ""))
-            close = float(row.get("close", 0))
-            high = float(row.get("high", 0))
-            if close > 0 and high > 0 and abs(close - high) < 0.02:
-                prev_close = round(close / 1.1, 2)
-                fixture = {
-                    "code": code,
-                    "pnl_pct": 0.1,
-                    "sellable_qty": 0,
-                    "locked_qty": 0,
-                    "price": close,
-                    "available_cash": 100000,
-                    "time": "10:30",
-                    "market_id": "CN_A_STOCK",
-                    "prev_close": prev_close,
-                    "snapshot_price": close,
-                    "_source": "pandadata_limit_up",
-                    "_date": date,
-                }
-                out_file = output_dir / f"limit_up_{code.replace('.', '_')}_{date}.json"
-                out_file.write_text(json.dumps(fixture, ensure_ascii=False, indent=2))
-                count += 1
-                if count >= 10:
-                    break
-    except Exception as e:
-        print(f"Warning: failed to generate limit-up fixtures: {e}", file=sys.stderr)
+    daily_records: list[dict[str, Any]] = []
+    for payload in exports.get("stock_daily", []):
+        try:
+            daily_records.extend(parse_stock_daily(payload))
+        except MCPError as e:
+            print(f"Warning: stock-daily export rejected: {e}", file=sys.stderr)
+
+    if not daily_records:
+        return 0
+
+    sample_set = set(trade_symbols[:50])
+    seen: set[str] = set()
+
+    for row in daily_records:
+        code = str(row.get("symbol") or "")
+        if not code or code in seen:
+            continue
+        if sample_set and code not in sample_set:
+            continue
+        close = row.get("close") or 0.0
+        high = row.get("high") or 0.0
+        if close > 0 and high > 0 and abs(close - high) < LIMIT_UP_TOLERANCE:
+            prev_close = round(close / 1.1, 2)
+            fixture = {
+                "code": code,
+                "pnl_pct": 0.1,
+                "sellable_qty": 0,
+                "locked_qty": 0,
+                "price": close,
+                "available_cash": 100000,
+                "time": "10:30",
+                "market_id": "CN_A_STOCK",
+                "_source": "pandadata_limit_up",
+                "_date": date,
+                "prev_close": prev_close,
+            }
+            _write_fixture(
+                output_dir,
+                f"limit_up_{code.replace('.', '_')}_{date}.json",
+                fixture,
+            )
+            seen.add(code)
+            count += 1
+            if count >= MAX_REAL_FIXTURES:
+                break
     return count
 
 
@@ -305,8 +315,7 @@ def generate_trigger_fixtures(output_dir: Path) -> int:
 
     count = 0
     for name, data in fixtures:
-        out_file = output_dir / f"{name}.json"
-        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        _write_fixture(output_dir, f"{name}.json", data)
         count += 1
     return count
 
@@ -322,9 +331,20 @@ def main() -> int:
         help="Output directory for generated fixtures",
     )
     parser.add_argument(
+        "--from-mcp",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Directory (or single JSON file) holding raw PandaData MCP export files, "
+            "e.g. suspended.json / st.json / trade_list.json / stock_daily.json. "
+            "These are the JSON responses the agent saved from "
+            "mcp__pandadata__call_pandadata."
+        ),
+    )
+    parser.add_argument(
         "--manual-only",
         action="store_true",
-        help="Only generate manual trigger fixtures (skip pandadata)",
+        help="Only generate manual trigger fixtures (skip MCP exports)",
     )
     args = parser.parse_args()
 
@@ -338,19 +358,30 @@ def main() -> int:
     total += trigger_count
     print(f"Generated {trigger_count} constraint-trigger fixtures")
 
-    if not args.manual_only:
-        panda_data = _try_init_pandadata()
-        if panda_data is None:
-            print(
-                "Warning: panda_data not available, skipping real data fixtures.",
-                file=sys.stderr,
-            )
-        else:
-            susp_count = generate_suspended_fixture(panda_data, args.date, output_dir)
-            st_count = generate_st_fixture(panda_data, args.date, output_dir)
-            limit_count = generate_limit_up_fixture(panda_data, args.date, output_dir)
-            total += susp_count + st_count + limit_count
-            print(f"Generated {susp_count} suspended + {st_count} ST + {limit_count} limit-up fixtures from pandadata")
+    use_mcp = not args.manual_only and bool(args.from_mcp)
+    if not args.manual_only and not args.from_mcp:
+        print(
+            "Warning: no --from-mcp export given; skipping real-data fixtures "
+            "(manual fixtures only).",
+            file=sys.stderr,
+        )
+
+    if use_mcp:
+        try:
+            exports = load_exports(args.from_mcp)
+        except MCPError as e:
+            print(f"Error: cannot load MCP exports: {e}", file=sys.stderr)
+            print(f"\nTotal: {total} fixtures in {output_dir}", file=sys.stderr)
+            return 1
+
+        susp_count = generate_suspended_fixture(exports, args.date, output_dir)
+        st_count = generate_st_fixture(exports, args.date, output_dir)
+        limit_count = generate_limit_up_fixture(exports, args.date, output_dir)
+        total += susp_count + st_count + limit_count
+        print(
+            f"Generated {susp_count} suspended + {st_count} ST + "
+            f"{limit_count} limit-up fixtures from MCP exports"
+        )
 
     print(f"\nTotal: {total} fixtures in {output_dir}")
     return 0

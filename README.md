@@ -48,14 +48,15 @@ AI 交易员在正常输入下可能表现良好，但在**重复下单、提示
 │   ├── config.py                   ← 配置加载与降级
 │   ├── env_check.py                ← 环境自检
 │   ├── validate.py                 ← JSONL 事件契约校验
-│   ├── fixture_generator.py        ← 夹具生成（需凭证）
+│   ├── fixture_generator.py        ← 夹具生成（消费 MCP 导出 JSON）
+│   ├── mcp_source.py               ← MCP 信封解析 / 截断与缺列校验
 │   └── sut_adapter.py              ← 被测系统接入适配器
 ├── tests/                          ← 单元测试
 ├── references/
 │   ├── api_guide.md                ← CLI / API 与字段说明
 │   ├── constraint_trigger_map.md   ← 约束触发条件映射表
 │   ├── validation_evidence.md      ← 实测验证记录（可复现）
-│   └── data_access.md              ← 数据接入说明（凭证、来源、离线边界）
+│   └── data_access.md              ← 数据接入说明（MCP 取数、来源、离线边界）
 └── fixtures/                       ← 评测夹具（确定性、无凭证）
     ├── generated/                  ← 自动生成夹具
     ├── manual/                     ← 手工夹具
@@ -68,6 +69,8 @@ AI 交易员在正常输入下可能表现良好，但在**重复下单、提示
 ## 快速开始
 
 ```bash
+# 0. 先过 SKILL.md 的「前置检查」：任一不过即停，只报告缺什么
+
 # 1. 安装测试依赖（评测执行本身只用标准库）
 pip install -r requirements-dev.txt
 
@@ -213,8 +216,9 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 ```bash
 export CONSTRAINT_LLM_BASE_URL=http://127.0.0.1:<port>
 export CONSTRAINT_LLM_MODEL="$ANTHROPIC_MODEL"
-export CONSTRAINT_LLM_API_KEY="$ANTHROPIC_AUTH_TOKEN"
 export CONSTRAINT_LLM_PROTOCOL=anthropic
+# 密钥由宿主（QuantStudio）环境注入：ANTHROPIC_AUTH_TOKEN 缺省时代码自动读取它，
+# 不要把密钥值写进命令、文件或版本库。
 
 CONSTRAINT_TRADER=llm CONSTRAINT_CASES_PER_TYPE=15 python3 scripts/build.py
 ```
@@ -285,7 +289,7 @@ CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=llm python3 scripts/build.py
 
 ### 自定义接入
 
-若端点不兼容 OpenAI 格式，或想走官方 SDK：
+若端点不兼容 OpenAI 格式，或想用别的客户端实现：
 
 ```python
 from scripts.llm_trader import make_llm_trader
@@ -464,10 +468,11 @@ python3 scripts/compare_baseline.py list
 ## 验收状态
 
 - `python3 scripts/build.py` 独立可运行 ✅
-- `python3 -m pytest tests/ -v` — **152 例全绿** ✅
+- `python3 -m pytest tests/ -v` — **219 例全绿** ✅
 - `env_check.py --self-check` 输出结构化 JSON，阻塞项非 0 退出 ✅
 - `validate.py` 对合法 JSONL 返回 0，对畸形文件返回非 0 ✅
-- 缺 panda_data 时 warn 而非 blocked（评测执行阶段不需要）✅
+- 缺 PyYAML 时优雅降级到内置默认值 ✅
+- 运行环境与数据都在 QuantStudio 侧：取数走 agent 侧 PandaData MCP（`mcp__pandadata__call_pandadata`），skill 内零凭证；`env_check` 的数据源项恒为 ok，离线评测不因 MCP 缺失而阻塞 ✅
 - 三种被测系统均端到端跑通：`stub`（自检）/ `sut`（规则引擎 19.44%→0%）/ `llm`（真实模型 8.89%→0%，p=0.0067）✅
 - 冻结基线可比性判定正确：`rules_in_prompt` 变化时标 `comparable: false` ✅
 
@@ -483,24 +488,57 @@ python3 scripts/compare_baseline.py list
 
 ## 数据来源
 
-| 阶段 | 数据 | 是否需要凭证 |
+本 skill 运行在 **QuantStudio** 环境，不自带任何取数组件与凭证。数据由阅读本 skill 的 AI 通过 **PandaData MCP** 取回，落盘为 JSON 后交给脚本。
+
+| 阶段 | 数据从哪来 | 是否需要凭证 |
 |---|---|---|
-| 夹具生成 | PandaAI data（`panda-data==1.0.6`） | **是**，仅此阶段 |
+| MCP 取数（agent 侧） | `mcp__pandadata__call_pandadata` | 用户在客户端 OAuth 登录，skill 内不存凭证 |
+| 夹具生成 | 只读 `--from-mcp` 指向的本地 JSON | **否** |
 | 评测执行 | 本地 `fixtures/` 只读 | **否** |
 
-凭证只从环境变量读取（`PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL`），或 `~/.pandadata/pandadata.env`，**任何情况下都不写入仓库**。
+### MCP 取数
+
+服务器 `pandadata`（Streamable HTTP，`https://pandadatamcp.pandaaiquant.com/mcp`，OAuth 登录）。
+调用顺序：`auth_status` → `search_methods` → `get_method_doc` → `call_pandadata`。
+
+| 数据需求 | 方法 | 参数 |
+|---|---|---|
+| 停牌标的 | `get_suspended_list` | `start_date`, `end_date`, `is_suspended`, `symbol` |
+| ST 标的 | `get_st_list` | `start_date`, `end_date`, `is_st`, `symbol` |
+| 在售股票列表 | `get_trade_list` | `date`, `exchange` |
+| 日线 | `get_stock_daily` | `symbol`(list), `start_date`, `end_date`, `fields`, `indicator`, `st` |
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_suspended_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_suspended": true},
+  "preview_rows": 2000
+})
+```
+
+> ⚠️ MCP 结果可能被截断（`truncated: true`，实测 240 行只回 180 行）。必须按窄日期区间分批取；`scripts/mcp_source.py` 遇到截断会抛 `MCPError`，绝不静默当完整数据用。
+
+### 夹具生成流水线
+
+```
+MCP 取数 → 落盘 mcp_exports/*.json → fixture_generator.py --from-mcp → fixtures/generated/*.json → build.py
+```
+
+```bash
+python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
+```
 
 `fixtures/generated/` 共 109 个夹具：
 
-- **26 个**由 panda_data 真实数据衍生（标的代码真实，价格与盈亏是构造值），带 `"_source": "pandadata_*"` 标记
+- **26 个**由 MCP 取回的真实数据衍生（标的代码真实，价格与盈亏是构造值），带 `"_source": "pandadata_*"` 标记
 - **83 个**为手工合成的边界值，确定性构造，覆盖 12 条硬约束
 
-> **clone 后无需任何凭证即可运行**：`python3 scripts/build.py` 直接可用。
-> 完整说明见 [`references/data_access.md`](references/data_access.md)。
+> **clone 后无需任何凭证、无需登录 MCP 即可运行**：`python3 scripts/build.py` 直接可用。
+> 完整说明见 [`references/data_access.md`](references/data_access.md) 与 [`references/api_guide.md`](references/api_guide.md)。
 
 ## 依赖
 
 - Python >= 3.10
 - PyYAML（可选，缺失时降级到内置默认值）
-- panda-data==1.0.6（仅夹具生成需要）
+- **零第三方数据依赖**：取数由 agent 通过 MCP 完成，脚本纯标准库
 

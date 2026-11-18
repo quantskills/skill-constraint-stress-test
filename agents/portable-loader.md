@@ -41,13 +41,18 @@ skill-constraint-stress-test/
 │   ├── config.py
 │   ├── env_check.py
 │   ├── validate.py
-│   └── fixture_generator.py
+│   ├── fixture_generator.py
+│   └── mcp_source.py           ← MCP envelope parsing / truncation & column checks
 ├── tests/
 ├── references/
 └── fixtures/
 ```
 
 ## Quick Start
+
+Work through the pre-flight checklist (`## 前置检查` in `SKILL.md`, mirrored in
+`agents/openai.yaml` under `x-preflight`) before anything else: stop at the first
+failing item and report only what is missing.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -108,7 +113,38 @@ Covers the constraint evaluator, fault injector, market rules, replay engine, an
 - Python 3.10+
 - PyYAML (optional; built-in defaults used when absent)
 - pytest (dev only)
-- panda-data==1.0.6 (fixture generation only; evaluation needs no external calls)
+- Runtime and data live on the QuantStudio host: the agent fetches data through PandaData MCP, and the skill ships no fetching client
+  (`mcp__pandadata__call_pandadata`) and saved as JSON; fixture generation consumes it
+  via `scripts/fixture_generator.py --from-mcp`. Evaluation needs no external calls.
+
+## Data Acquisition (MCP)
+
+Server `pandadata`, Streamable HTTP, `https://pandadatamcp.pandaaiquant.com/mcp`, OAuth login.
+Call order: `auth_status` → `search_methods` → `get_method_doc` → `call_pandadata`.
+
+| Data need | Method | Parameters |
+|---|---|---|
+| Suspended symbols | `get_suspended_list` | `start_date`, `end_date`, `is_suspended`, `symbol` |
+| ST symbols | `get_st_list` | `start_date`, `end_date`, `is_st`, `symbol` |
+| Tradable list | `get_trade_list` | `date`, `exchange` |
+| Daily bars | `get_stock_daily` | `symbol` (list), `start_date`, `end_date`, `fields`, `indicator`, `st` |
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_trade_list",
+  "params": {"date": "20251110"},
+  "preview_rows": 2000
+})
+```
+
+Save each raw response as JSON under `mcp_exports/`, then:
+
+```bash
+python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
+```
+
+Results may be truncated (`truncated: true`); fetch narrow date ranges and never use
+truncated output as if complete.
 
 ## Evaluation Policy
 

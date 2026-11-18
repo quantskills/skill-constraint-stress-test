@@ -5,7 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-18
+
+### Added — 前置检查（QuantStudio 宿主口径）
+
+`SKILL.md` 原先把取数前提写在「数据获取」章节里，评测与桩件的边界写在后面，
+只读适配器的 agent 会跳过它们直接跑评测：把 `trader=stub` 的 hold 当成
+「AI 交易员守住了约束」，或把三年前落盘的夹具当成当日行情报违反率。
+
+- `SKILL.md` 顶部新增 `## 前置检查（未通过就停：只报告缺什么，不加载后续流程）`，
+  排在所有可执行流程之前，按两条线路写阻塞语义：生成 / 更新夹具时 MCP 会话
+  （`auth_status` 且 `reauth_required: false`）、权限探针（`get_trade_list`，
+  `data_permission_required` 即停）、截断处理是阻塞项；用既有夹具评测时 MCP 不是阻塞项
+  （`mcp_data_source` 恒为 ok 属设计如此），但必须写明夹具来源与生成日期；
+  `trader=stub` 必须判 `inconclusive`，温度 0 与可比性字段必须与对照臂一致。
+- 新增 `tests/test_preflight.py`（5 例）：小节存在且覆盖宿主前提、排在所有可执行流程之前、
+  两条线路阻塞语义分明、桩件结论不得写成交易员表现、文档不再描述取数客户端与凭证符号。
+- `agents/openai.yaml` 新增 `x-preflight` 块；`agents/portable-loader.md`、
+  `agents/cursor-rule.mdc` 与 `INSTALL.md` 都接上这一步，README 快速开始加第 0 步。
+- 文档口径统一为「运行环境 = QuantStudio 宿主，数据 = PandaData MCP 落盘」：
+  `SKILL.md` / `README*.md` / `INSTALL.md` / `references/*.md` / `agents/*` /
+  `scripts/env_check.py` / `scripts/fixture_generator.py` / `requirements*.txt` /
+  `skill.json` 中的「数据 SDK」描述全部改写（已发布版本的历史记述未改动）；
+  `env_check` 的 `mcp_data_source.found` 一并标注 QuantStudio 宿主。
+- 模型侧措辞澄清：`README.md` 的自定义接入不再提「官方 SDK」，
+  `scripts/llm_trader.py` 写明只用标准库 `urllib`，不引入第三方客户端库。
+- 文档测试计数 214 → 219；`references/validation_evidence.md` 补上此前漏列的
+  `test_agent_mode.py`（14 例）。
+
+### Changed
+- **数据获取方式彻底改为 PandaData MCP**：由阅读 skill 的 AI 调用
+  `mcp__pandadata__call_pandadata` 取数并落盘 JSON，脚本只消费本地文件。
+  skill 内不再出现任何取数客户端、凭证读取或网络调用。
+  - `scripts/fixture_generator.py`：删除取数客户端初始化函数、凭证环境变量读取与
+    token 初始化调用；新增 `--from-mcp <目录或文件>`，
+    读取 MCP 导出并转成既有 fixture 结构（字段口径不变，输出与仓库中已发布夹具逐字节一致）
+  - `scripts/env_check.py`：删除取数客户端依赖检查，新增不联网的 `mcp_data_source` 检查项
+    （恒为 `ok`），并说明「数据由 agent 通过 MCP 获取，本 skill 执行阶段只读本地 fixture」
+  - `requirements.txt` / `requirements-dev.txt`：移除取数客户端依赖
+  - 文档（`SKILL.md`、`README.md`、`README.en.md`、`INSTALL.md`、
+    `references/api_guide.md`、`references/data_access.md`、`agents/*`、
+    `skill.json` 的 `data_source_note`）全部改写为 MCP 取数口径，
+    给出「数据需求 → 方法 + 参数」对照表与完整调用顺序
+  - CI 负路径断言由「缺取数客户端依赖时 warn」改为「数据源为 agent 侧 MCP 且恒不阻塞」
+- `references/data_access.md` 重写为 MCP 流水线图：
+  `MCP 取数 → 落盘 JSON → fixture_generator.py --from-mcp → build.py`
+
+### Added
+- `scripts/mcp_source.py`（纯标准库）：解析 MCP 两种返回形态（`type=dataframe` 与普通列表/字典）、
+  校验 `ok` / `truncated` / 必需列，抛出带 `code` / `message` / `hint` / `details` 的 `MCPError`
+- `tests/test_mcp_source.py`（48 例，全程离线）：两种信封形态、`ok=false`、
+  截断拒绝与显式放行、缺列、行列不齐、导出目录 / 单文件 / 多方法 / 信封数组加载、
+  未识别方法与不可读 JSON
+- 截断防御：MCP 结果 `truncated=true` 时结构化报错并提示按窄日期区间分批，
+  绝不静默把截断数据当完整数据使用（实测 240 行只回 180 行，`truncation_reasons: ["byte_limit"]`）
+
+### 说明
+- 评测执行阶段仍然**完全离线**：已生成的 109 个夹具继续随仓库发布，clone 即可运行
+- 测试总数 166 → 214，全绿
 
 ### Added
 - `references/data_access.md`：数据接入说明（凭证来源、夹具真实/合成比例、离线边界、给其他 AI 的操作约定）
@@ -58,7 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skill.json` 的 `license` 改为 SPDX 标识 `GPL-3.0-only`
 - 结果输出目录由 `results/` 改为 `output/`，并加入 `.gitignore`
 - 环境变量统一使用 `CONSTRAINT_` 前缀
-- 夹具生成凭证环境变量统一为 `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL`（保留历史变量名回退）
+- 夹具生成的凭证读取曾改为统一前缀的环境变量
+  （**已在 Unreleased 中移除**：数据改为 agent 侧 MCP 获取，skill 内不再读取任何凭证）
 
 ### Added
 - `scripts/build.py`：标准 `run(input_data, config=None)` 入口与 `validate_input()`

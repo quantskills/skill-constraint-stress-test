@@ -27,3 +27,7 @@ baselines/
 # 注：fixtures/generated/ 中的评测夹具随仓库发布（确定性、无凭证），
 # 保证 clone 后无需凭证即可运行；需要重建时执行
 # python3 scripts/fixture_generator.py --manual-only
+#
+# MCP 原始导出为中间产物，不入库：
+# python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
+mcp_exports/

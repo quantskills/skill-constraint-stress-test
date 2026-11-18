@@ -1,96 +1,140 @@
 # 数据接口（api_guide）
 
-本 skill 有两条行情通道，产出结构完全相同，调用方通过参数选择，绝不静默切换。
+本 skill 只有一条取数通道：**PandaData MCP**，由阅读 skill 的 AI 调用，脚本只消费落盘的 JSON。
+取数只有「agent 经 MCP 落盘」这一条通道，不存在其他取数方式，也不做任何静默降级。
 
-## 1. panda_data（生产通道）
+## 1. MCP 服务器
 
 | 项 | 值 |
 |---|---|
-| 包名 | `panda-data==1.0.6` |
-| Python | 实测 3.10+（SDK 自身声明） |
-| 入口 | `scripts/data_loader.py::load_panda` |
-| 认证 | `panda_data.init_token(username=..., password=..., base_url=..., country="CN")` |
-| 默认服务地址 | `https://pandadata.pandaaiquant.com` |
+| 服务器名 | `pandadata` |
+| 传输 | Streamable HTTP |
+| 地址 | `https://pandadatamcp.pandaaiquant.com/mcp` |
+| 认证 | OAuth（用户在客户端登录） |
+| skill 内凭证 | 无。不写入任何账号 / 密码 / token |
 
-### 凭证
+## 2. 工具清单与调用顺序
 
-只从环境变量读取，任一别名命中即可：
-
-| 变量 | 别名 |
+| 工具 | 用途 |
 |---|---|
-| `PANDA_DATA_USERNAME` | `PANDADATA_USERNAME` |
-| `PANDA_DATA_PASSWORD` | `PANDADATA_PASSWORD` |
-| `PANDA_DATA_BASE_URL` | `PANDADATA_BASE_URL`（可选） |
+| `mcp__pandadata__auth_status` | 确认登录状态 |
+| `mcp__pandadata__search_methods` | 按关键词检索方法名 |
+| `mcp__pandadata__get_method_doc` | 取方法的参数签名与返回列 |
+| `mcp__pandadata__call_pandadata` | 实际取数 |
 
-缺失时抛 `DataUnavailable`，不做任何降级。
-
-### 使用的接口
-
-| 接口 | 用途 | 关键参数 |
-|---|---|---|
-| `get_future_dominant` | 主力连续日线，品种代码如 `RB` | `underlying_symbol`, `start_date`, `end_date` |
-| `get_future_daily` | 具体合约日线，如 `RB2610` | `symbol`, `start_date`, `end_date` |
-
-选择规则：`symbol` 含数字视为具体合约，走 `get_future_daily`；否则走 `get_future_dominant`。
-
-### 字段映射
-
-| panda_data 列 | 内部字段 |
-|---|---|
-| `trade_date` / `date` | `date`（`YYYYMMDD`） |
-| `open/high/low/close` | 同名 |
-| `volume` | `volume`（缺失记 0） |
-
-### 调用示例
-
-```python
-from data_loader import load_bars
-
-loaded = load_bars("RB", "20240101", "20241231")
-print(loaded["source"])   # "panda"
-print(loaded["bars"][0])
+```
+auth_status → search_methods → get_method_doc → call_pandadata
 ```
 
-## 2. CSV fallback（离线通道）
+### `call_pandadata` 参数
 
-用于无凭证、无网络或 CI 环境。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `method` | str | `get_*` 方法名 |
+| `params` | dict | 方法参数 |
+| `preview_rows` | int | 0–2000，**只控制本地预览行数，不控制网关取数** |
 
-文件要求：表头为 `date,open,high,low,close[,volume]`，`date` 为 `YYYYMMDD` 或 `YYYY-MM-DD`。
+### 返回信封
 
-```python
-loaded = load_bars("RB", "20240101", "20241231", csv_path="tests/fixtures/bars_RB.csv")
-print(loaded["source"])   # "csv"
+```json
+{"ok": true, "method": "...", "params": {...}, "result": ..., "request_id": "..."}
 ```
 
-`load_csv` 会校验列缺失、数值可解析、非空行；任何一条不满足都抛 `DataUnavailable` 并指出具体原因。
+两种 `result`：
 
-## 3. 观点文本输入
+- 表格型：`{"type":"dataframe","columns":[...],"rows":[[...]],"row_count":N,"total_rows":N,"truncated":bool,"truncation_reasons":[...]}`
+- 普通列表/字典：`[{"date":..., "symbol":...}]` / `{"date": ...}`
 
-观点文本不来自行情接口，由调用方提供。契约见 `references/schema.md`。
+## 3. 本 skill 用到的 4 个方法
 
-必备字段：
-
-| 字段 | 必需 | 说明 |
+| 方法 | 参数 | 返回 |
 |---|---|---|
-| `text` | 是 | 观点原文 |
-| `published_at` | 回测必需 | ISO-8601，抽取阶段可为 null |
-| `id` | 否 | 缺省 `doc001` |
-| `source` | 否 | 来源标识 |
+| `get_suspended_list` | `start_date`(必填), `end_date`(必填), `is_suspended`(可选), `symbol`(可选) | dataframe：`symbol,date,is_suspended` |
+| `get_st_list` | `start_date`(必填), `end_date`(必填), `is_st`(可选), `symbol`(可选) | dataframe：`symbol,date,is_st` |
+| `get_trade_list` | `date`(必填), `exchange`(可选) | 列表 `[{date,symbol}, ...]` |
+| `get_stock_daily` | `symbol`(list), `start_date`(必填), `end_date`(必填), `fields`(可选), `indicator`, `st` | dataframe：`date,symbol,open,high,low,close,pre_close,volume,amount,limit_up,limit_down,trade_status,name` |
 
-## 4. 合法性与时间戳前提
+## 4. 调用示例
 
-- 观点来源必须**合法可用**：公开网页、公开报告、获得授权的终端数据。本 skill 不提供任何抓取实现，也不内置任何来源。
-- 时间戳必须是**首次发布时间**，不是最后编辑时间。若来源只能给出编辑时间，必须在上游显式修正，不能靠本 skill 猜。
-- 同一观点被多处转载时，应在上游去重，只保留首次发布那条。本 skill 不做跨来源去重，重复输入会被当成多条独立观点。
-- 覆盖要求：样本必须包含**沉默（未表态）、反转（否定/修正）、错误观点**，不能只留命中的。
+```
+mcp__pandadata__auth_status({})
+```
 
-## 5. 市场范围
+```
+mcp__pandadata__get_method_doc({"method": "get_suspended_list"})
+```
 
-| 项 | 范围 |
-|---|---|
-| 支持 | 内盘商品期货、股指期货（日线） |
-| 品种映射 | 白名单，见 `scripts/common.py::INSTRUMENTS` |
-| 不支持 | 表外品种、外盘合约、期权、股票（本版本） |
-| 频率 | 日线，收盘口径 |
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_suspended_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_suspended": true},
+  "preview_rows": 2000
+})
+```
 
-期货模拟赛核验时，若某品种或接口不可用，应在报告 `applicability.out_of_scope` 中明确写出等价回放范围，而不是替换成别的品种继续跑。
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_st_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_st": true},
+  "preview_rows": 2000
+})
+```
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_trade_list",
+  "params": {"date": "20251110"},
+  "preview_rows": 2000
+})
+```
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_stock_daily",
+  "params": {
+    "symbol": ["000001.SZ", "000407.SZ", "000851.SZ"],
+    "start_date": "20251110",
+    "end_date": "20251110",
+    "fields": ["open", "high", "low", "close", "pre_close"]
+  },
+  "preview_rows": 2000
+})
+```
+
+## 5. 字段映射（MCP 列 → 内部字段）
+
+| MCP 列 | 内部字段 | 处理 |
+|---|---|---|
+| `symbol` | `symbol` / fixture `code` | 原样；缺或空 → `mcp_missing_columns` |
+| `date` | `date` / fixture `_date` | 归一为 `YYYYMMDD` 字符串（数值/浮点均可） |
+| `is_suspended` | 过滤条件 | 布尔化（`true/1/"true"`…）；无法解析 → `mcp_invalid_shape` |
+| `is_st` | 过滤条件 | 同上 |
+| `open/high/low/close/pre_close` | 同名 | 转 float；空值 → `None` |
+| `limit_up/limit_down` | 同名 | 转 float |
+| `name` | 同名 | 原样 |
+
+## 6. 截断必须处理
+
+网关会截断大结果（实测 240 行 → 180 行，`truncation_reasons: ["byte_limit"]`）。
+
+- 取数按窄日期区间、小批 symbol 分批
+- `truncated=true` → `scripts/mcp_source.py` 抛 `MCPError(code="mcp_truncated")`
+- **绝不静默把截断数据当完整数据用**
+
+## 7. 错误码（`MCPError.code`）
+
+| code | 含义 | 处置 |
+|---|---|---|
+| `mcp_ok_false` | 信封 `ok=false` 且无 `error.code` | 先 `auth_status`，再重试 |
+| `mcp_truncated` | 结果被截断 | 缩小日期区间 / symbol 批次后重取 |
+| `mcp_missing_columns` | 表格缺必需列 | 用 `fields` 显式请求，或查 `get_method_doc` |
+| `mcp_invalid_shape` | 结构不符（行列不齐、类型不对） | 检查是否手工改过导出文件 |
+| `mcp_unknown_method` | 导出了本 skill 不用的方法 | 只导出 4 个方法之一 |
+| `mcp_export_not_found` | `--from-mcp` 路径不存在或为空目录 | 先完成 MCP 取数并落盘 |
+| `mcp_export_unreadable` | JSON 无法解析 | 原样保存响应，不要手工编辑 |
+| `mcp_export_empty` | 目录里没有可识别的方法导出 | 按约定的文件名落盘 |
+
+## 8. 离线边界
+
+`scripts/mcp_source.py` 与 `scripts/fixture_generator.py` 均为**纯标准库、不联网**。
+评测执行阶段只读 `fixtures/`，clone 即可运行。

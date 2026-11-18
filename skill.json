@@ -1,10 +1,10 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
-  "data_source": "PandaData",
+  "data_source": "PandaData MCP (QuantStudio)",
   "entry_script": "scripts/build.py",
   "evaluation": {
     "mode": "replay-only",
@@ -21,5 +21,5 @@
     "group_by": "model_id",
     "comparability_policy": "跨模型比较必须固定 fixture 集、注入类型、案例数、阈值、温度与预算；上述字段计入 config_hash。不同模型结果不得合并为同一指标。"
   },
-  "data_source_note": "仅夹具生成阶段使用 panda-data==1.0.6，评测执行阶段只读本地 fixture"
+  "data_source_note": "数据获取由阅读 skill 的 AI 调用 PandaData MCP 工具 mcp__pandadata__call_pandadata 完成（OAuth 登录；skill 不含任何凭证），取回结果落盘 JSON 后由 fixture_generator.py --from-mcp 转换；评测执行阶段只读本地 fixture，完全离线"
 }

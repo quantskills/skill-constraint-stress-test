@@ -10,7 +10,50 @@ This package contains one evaluation skill:
 
 - Python 3.10+
 - `pip install -r requirements-dev.txt` for running tests (PyYAML + pytest)
-- `panda-data==1.0.6` only if you regenerate fixtures (see `scripts/fixture_generator.py`); the evaluation itself needs no external dependency
+- **Nothing to install for data access.** Runtime and data both live on the QuantStudio host: data is fetched by the AI reading this skill through PandaData MCP (`mcp__pandadata__call_pandadata`), and `scripts/fixture_generator.py --from-mcp` consumes the saved JSON. The evaluation itself needs no external dependency and runs fully offline.
+
+## Pre-flight checks
+
+Before running anything, work through the checklist in `SKILL.md` (`## 前置检查`,
+mirrored in `agents/openai.yaml` under `x-preflight`). Stop at the first failing item
+and report only what is missing: never switch data source, never read a stub result as
+AI-trader behaviour, and never present fixtures as same-day data without their landing date.
+
+## PandaData MCP (only when regenerating fixtures)
+
+This skill never stores credentials. The agent obtains data via MCP:
+
+| Item | Value |
+|---|---|
+| Server | `pandadata` (Streamable HTTP) |
+| URL | `https://pandadatamcp.pandaaiquant.com/mcp` |
+| Auth | OAuth login in your MCP client |
+| Tools | `mcp__pandadata__auth_status`, `search_methods`, `get_method_doc`, `call_pandadata` |
+
+Register the server in your client, e.g. for Claude Code:
+
+```bash
+claude mcp add --transport http pandadata https://pandadatamcp.pandaaiquant.com/mcp
+```
+
+Then, in the agent session:
+
+```
+mcp__pandadata__auth_status({})
+mcp__pandadata__call_pandadata({
+  "method": "get_suspended_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_suspended": true},
+  "preview_rows": 2000
+})
+```
+
+Save each response as JSON and run:
+
+```bash
+python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
+```
+
+> Results can be truncated (`truncated: true`). Fetch in narrow date ranges; `scripts/mcp_source.py` refuses truncated data.
 
 ---
 

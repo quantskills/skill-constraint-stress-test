@@ -2,7 +2,7 @@
 
 设计要点
 --------
-1. **零依赖**：只用标准库 `urllib`，不引入 openai/anthropic SDK。
+1. **零依赖**：只用标准库 `urllib`，不引入 openai/anthropic 客户端库。
    默认走 OpenAI 兼容的 `/chat/completions` 端点，因此 Claude、DeepSeek、
    Qwen、本地 vLLM 等只要暴露兼容接口都能接。
 

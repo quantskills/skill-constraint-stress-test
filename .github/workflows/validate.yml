@@ -50,16 +50,16 @@ jobs:
           if [ "$code" -eq 0 ]; then echo "FAIL: expected non-zero for bad JSONL"; exit 1; fi
           rm -f /tmp/bad_events.jsonl
 
-      - name: "Negative: dependency_missing hint contains install command"
+      - name: "Negative: data source is agent-side MCP and never blocks"
         run: |
-          # env_check 在缺 panda_data 时应 warn 而非 blocked（因为是可选依赖）
+          # 数据由 agent 通过 MCP 获取；本 skill 执行阶段只读本地 fixture。
+          # 该检查项必须恒为 ok，MCP 缺失不得 blocking。
           output=$(python scripts/env_check.py --self-check --json 2>/dev/null || true)
           echo "$output" | python -c "
           import sys, json
           r = json.loads(sys.stdin.read())
-          for g in r['groups']:
-            for item in g['items']:
-                if item['name'] == 'panda_data' and item['status'] == 'warn':
-                    assert 'pip install' in item.get('hint', ''), 'hint must contain pip install'
-          print('OK: dependency hint verified')
+          items = {i['name']: i for g in r['groups'] for i in g['items']}
+          assert 'mcp_data_source' in items, 'mcp_data_source check missing'
+          assert items['mcp_data_source']['status'] == 'ok', 'MCP data source must never block'
+          print('OK: data source is agent-side MCP')
           "

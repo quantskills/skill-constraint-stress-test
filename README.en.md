@@ -45,14 +45,15 @@ This skill constructs those fault scenarios, replays the trader's decision chain
 │   ├── config.py                   ← Config loading with graceful fallback
 │   ├── env_check.py                ← Environment self-check
 │   ├── validate.py                 ← JSONL event contract validator
-│   ├── fixture_generator.py        ← Fixture generation (credentials required)
+│   ├── fixture_generator.py        ← Fixture generation (consumes MCP export JSON)
+│   ├── mcp_source.py               ← MCP envelope parsing / truncation & column checks
 │   └── sut_adapter.py              ← System-under-test adapter
 ├── tests/                          ← Unit tests
 ├── references/
 │   ├── api_guide.md                ← CLI / API and field reference
 │   ├── constraint_trigger_map.md   ← Constraint trigger mapping
 │   ├── validation_evidence.md      ← Validation evidence (reproducible)
-│   └── data_access.md              ← Data access (credentials, provenance, offline boundary)
+│   └── data_access.md              ← Data access (MCP fetch, provenance, offline boundary)
 └── fixtures/                       ← Evaluation fixtures (deterministic, no credentials)
     ├── generated/                  ← Auto-generated fixtures
     ├── manual/                     ← Hand-written fixtures
@@ -65,6 +66,9 @@ Runtime results are written to `output/` (excluded by `.gitignore`).
 ## Quick Start
 
 ```bash
+# 0. Work through the pre-flight checklist (## 前置检查) in SKILL.md first;
+#    if any item fails, stop and report what is missing.
+
 # 1. Install test dependencies (evaluation itself only needs the standard library)
 pip install -r requirements-dev.txt
 
@@ -212,8 +216,10 @@ Many local proxies expose only Anthropic's `/v1/messages`, not OpenAI's `/chat/c
 ```bash
 export CONSTRAINT_LLM_BASE_URL=http://127.0.0.1:<port>
 export CONSTRAINT_LLM_MODEL="$ANTHROPIC_MODEL"
-export CONSTRAINT_LLM_API_KEY="$ANTHROPIC_AUTH_TOKEN"
 export CONSTRAINT_LLM_PROTOCOL=anthropic
+# The key comes from the host (QuantStudio) environment: the adapter reads
+# ANTHROPIC_AUTH_TOKEN when CONSTRAINT_LLM_API_KEY is unset. Never write a literal
+# key into a command, a file, or the repository.
 
 CONSTRAINT_TRADER=llm CONSTRAINT_CASES_PER_TYPE=15 python3 scripts/build.py
 ```
@@ -409,10 +415,11 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 ## Acceptance Status
 
 - `python3 scripts/build.py` runs standalone ✅
-- `python3 -m pytest tests/ -v` — **152 passing** ✅
+- `python3 -m pytest tests/ -v` — **219 passing** ✅
 - `env_check.py --self-check` emits structured JSON with non-zero exit on blockers ✅
 - `validate.py` returns 0 for valid JSONL and non-zero for malformed files ✅
-- Missing panda_data reports `warn`, not `blocked` (not needed at evaluation time) ✅
+- Missing PyYAML degrades gracefully to built-in defaults ✅
+- Runtime and data both live on the QuantStudio host: acquisition goes through the agent-side PandaData MCP (`mcp__pandadata__call_pandadata`), the skill ships no fetching client and no credentials. `env_check` reports the data-source item as `ok` and offline evaluation is never blocked by a missing MCP ✅
 - All three systems under test run end-to-end: `stub` (self-check) / `sut` (rule engine 19.44%→0%) / `llm` (real model 8.89%→0%, p=0.0067) ✅
 - Frozen-baseline comparability is correct: a `rules_in_prompt` change flags `comparable: false` ✅
 
@@ -430,24 +437,57 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 
 ## Data Sources
 
-| Stage | Data | Credentials required |
+This skill runs inside the **QuantStudio** environment and ships **no fetching client of its own**. Data is fetched by the AI reading this skill through **PandaData MCP**, then saved as JSON and handed to the scripts.
+
+| Stage | Where the data comes from | Credentials required |
 |---|---|---|
-| Fixture generation | PandaAI data (`panda-data==1.0.6`) | **Yes**, this stage only |
+| MCP data fetch (agent side) | `mcp__pandadata__call_pandadata` | User logs in via OAuth in the client; the skill stores no credentials |
+| Fixture generation | Local JSON pointed to by `--from-mcp` | **No** |
 | Evaluation | Local `fixtures/`, read-only | **No** |
 
-Credentials are read only from environment variables (`PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` / `PANDA_DATA_BASE_URL`) or `~/.pandadata/pandadata.env` — **never committed to the repo**.
+### MCP data fetch
+
+Server `pandadata` (Streamable HTTP, `https://pandadatamcp.pandaaiquant.com/mcp`, OAuth login).
+Call order: `auth_status` → `search_methods` → `get_method_doc` → `call_pandadata`.
+
+| Data need | Method | Parameters |
+|---|---|---|
+| Suspended symbols | `get_suspended_list` | `start_date`, `end_date`, `is_suspended`, `symbol` |
+| ST symbols | `get_st_list` | `start_date`, `end_date`, `is_st`, `symbol` |
+| Tradable symbol list | `get_trade_list` | `date`, `exchange` |
+| Daily bars | `get_stock_daily` | `symbol` (list), `start_date`, `end_date`, `fields`, `indicator`, `st` |
+
+```
+mcp__pandadata__call_pandadata({
+  "method": "get_suspended_list",
+  "params": {"start_date": "20251110", "end_date": "20251110", "is_suspended": true},
+  "preview_rows": 2000
+})
+```
+
+> ⚠️ MCP results may be truncated (`truncated: true`; in a measured run, 240 minute-bars came back as 180). Fetch in narrow date ranges. `scripts/mcp_source.py` raises `MCPError` on truncation and never silently treats truncated data as complete.
+
+### Fixture generation pipeline
+
+```
+MCP fetch → save mcp_exports/*.json → fixture_generator.py --from-mcp → fixtures/generated/*.json → build.py
+```
+
+```bash
+python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
+```
 
 `fixtures/generated/` holds 109 fixtures:
 
-- **26** derived from real panda_data (real symbol codes; prices and P&L are constructed), marked with `"_source": "pandadata_*"`
+- **26** derived from real data fetched over MCP (real symbol codes; prices and P&L are constructed), marked with `"_source": "pandadata_*"`
 - **83** hand-built boundary values covering the 12 hard constraints
 
-> **No credentials needed after clone**: `python3 scripts/build.py` runs immediately.
-> Full details: [`references/data_access.md`](references/data_access.md).
+> **No credentials and no MCP login needed after clone**: `python3 scripts/build.py` runs immediately.
+> Full details: [`references/data_access.md`](references/data_access.md) and [`references/api_guide.md`](references/api_guide.md).
 
 ## Dependencies
 
 - Python >= 3.10
 - PyYAML (optional, falls back to built-in defaults)
-- panda-data==1.0.6 (fixture generation only)
+- **Zero third-party data dependencies**: the agent fetches data over MCP; all scripts are standard-library only
 

@@ -12,8 +12,8 @@ python3 -m pytest tests/ -q
 
 | 项 | 结果 |
 |---|---|
-| 用例总数 | 152 |
-| 通过 | 152 |
+| 用例总数 | 219 |
+| 通过 | 219 |
 | 失败 | 0 |
 | 环境 | Python 3.11.16 |
 
@@ -29,6 +29,9 @@ python3 -m pytest tests/ -q
 | `test_compare_baseline.py` | 11 | 冻结基线 freeze/compare/list |
 | `test_replay_engine.py` | 11 | 回放与聚合 |
 | `test_validate.py` | 10 | 事件契约校验 |
+| `test_mcp_source.py` | 48 | MCP 信封两种形态、截断拒绝、缺列、ok=false、导出加载（全程离线） |
+| `test_agent_mode.py` | 14 | agent 模式的参数暴露、导出契约与运行时对齐 |
+| `test_preflight.py` | 5 | **前置检查小节存在且覆盖宿主前提**、**排在所有可执行流程之前**、**取新数据与离线评测两条线路的阻塞语义分明**、**桩件结论不得写成交易员表现**、**文档不再描述取数组件与凭证通道** |
 
 ---
 
