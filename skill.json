@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
@@ -15,7 +15,10 @@
         "id": "stub-trader",
         "role": "subject",
         "description": "内置桩件，固定返回 hold，用于验证评测链路本身",
-        "budget": { "tokens": 0, "timeout_s": 0 }
+        "budget": {
+          "tokens": 0,
+          "timeout_s": 0
+        }
       }
     ],
     "group_by": "model_id",

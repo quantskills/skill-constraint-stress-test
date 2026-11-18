@@ -18,8 +18,11 @@ venv/
 # Skill runtime output
 output/
 
-# 冻结基线（本地快照，不随仓库发布）
-baselines/
+# 冻结基线：**随包发布**。job 的交付要求里有「冻结基线对照」，而住在被 ignore 目录里的
+# 基线对 `git clone` 安装的人根本不存在（本轮实测差点把唯一的真实模型运行锚点丢掉）。
+# 只放 JSON 锚点；同目录下的临时文件仍排除。
+baselines/*
+!baselines/*.json
 
 # 日志
 *.log
