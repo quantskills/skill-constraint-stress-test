@@ -1,3 +1,43 @@
+## [0.3.0] — 2026-11-18
+
+### Fixed（结论级）
+- **McNemar p 值被系统性低估一半**：`erfc(sqrt(chi2/2)) / 2` 中的 `/2` 是多余的——df=1 卡方的生存函数
+  本身就是 `erfc(sqrt(chi2/2))`。`b=5, c=0` 由「显著（0.0368）」纠正为「不显著（0.0736）」，
+  足以翻转 `positive` 判定。现同时报渐进值与精确二项检验值，不一致对子 ≤100 时以精确值判定。
+- **McNemar 配对基与结论口径不一致**：配对用 `violations`（含软约束）、`_verdict` 用
+  `hard_violations`，改为统一 `hard_violations`，并在报告中输出 `pairing_basis`。
+- **`config_hash` 未绑定实际生效的约束**：`max_orders_per_day` / `max_order_notional` 原先只在
+  `fixed_fields` 里声明、不进哈希，改上限后 `compare_baseline` 仍判「可比」。
+- **`fixtures_fingerprint` 全仓无赋值点**：它参与哈希却永远取到 `None`，换整套夹具哈希不变。
+  现按实际载入夹具（键名＋来源文件＋内容）计算，并输出 `fixture_count` / `fixtures_bound`，
+  两者不等时报告 `fixtures_partially_used` 告警。
+- **`duplicate_time_window_seconds` 是装饰性旋钮**：参数收下却从不参与判定，文档写的「5 秒窗口」
+  实为全历史窗口。现真正生效；输入时钟只有分钟粒度已写明；时间缺失时保守判为窗口内
+  （「不知道时间」不许冒充「不在窗口内」）。
+- **夹具绑定空转**：生成器写 `position_{i:04d}`，夹具编号却来自「按文件名排序后依次编号」，
+  `cases_per_type=15` 时四类案例全挤在同一批 15 个夹具上，其余 94 个（86%）永不参与评测；
+  引用不到时还会静默退回「第一个夹具」甚至硬编码假持仓。改为 round-robin 绑定并在引用不到时
+  结构化报错 `position_ref_unbound`。
+- **导出清单与评测各建一套案例**：请求身份是扰动输入的内容指纹，两处绑定逻辑不同步会造成
+  「导出的请求在评测里对不上号」的静默失配。现共用 `injector.bind_machine_refs`。
+- **`agent` 模式 replay CLI 必崩**：以 dict 调用 `run(cases_dir=...)`，`Path(dict)` 抛 `TypeError`
+  且未被捕获；`--cases-per-type` 解析后也从未传入。
+- **`build.run(input, config)` 的 config 覆盖被整体丢弃**：docstring 承诺「参数 > config > 配置文件
+  > 默认值」，实际除 `output_dir` 外全部不生效。
+- **配置文件里的 `injection_types` 不生效**：只进哈希、不参与案例选择。
+- **环境变量类型转换**：默认值为 `None`/`dict`/`list` 的键原先原样塞字符串，
+  `CONSTRAINT_MAX_ORDERS_PER_DAY=10` 会在约束比较处抛 `TypeError`。
+
+### Removed
+- 删除 skill 内部的 LLM 协议客户端（`_post_json` / `anthropic_messages_chat` /
+  `openai_compatible_chat` / `detect_chat_fn` / `make_llm_trader` / `llm_trader_from_env`）与
+  `CONSTRAINT_LLM_*` 通道：真实模型评测统一改走 `agent` 模式，由阅读本 skill 的 agent 亲自作答。
+  `trader=llm` 现在显式报错 `trader_llm_removed`，不再静默降级。保留提示词渲染与决策解析。
+
+### Tests
+- 新增锚定用例：McNemar 精确/渐进值与「不砍半」回归锚点、`hard_violations` 配对基、
+  窗口旋钮有效性（同输入只改窗口必须改变结论）、时间缺失保守判定。216 passed / 0 failed。
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

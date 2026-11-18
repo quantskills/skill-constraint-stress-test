@@ -5,7 +5,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -214,3 +215,32 @@ def generate_timeout_retry_cases(
             )
         )
     return cases
+
+
+_MACHINE_REF = re.compile(r"^position_\d{4}$")
+
+
+def bind_machine_refs(
+    cases: list["InjectionCase"], positions: dict[str, Any]
+) -> list["InjectionCase"]:
+    """把机器分配的 `position_XXXX` 引用轮转绑定到**实际载入的夹具**上。
+
+    生成器只按案例序号写 `position_{i:04d}`，而夹具编号来自「按文件名排序后依次
+    编号」——于是四类案例全部挤在排序最靠前的 `cases_per_type` 个夹具上，其余夹具
+    一条都进不了引擎，且「哪些夹具参与」取决于文件名首字母，与案例想考的约束无关。
+
+    这里按案例全局序号 round-robin 重绑，让夹具池被均匀覆盖。只改写机器分配的
+    ref（`^position_\\d{4}$`），调用方显式绑定的原样保留。
+
+    导出清单（`agent_mode.export_requests`）与评测（`run_eval.run`）**必须走同一个
+    绑定函数**：请求身份是扰动后输入的内容指纹，两边绑定不一致就会出现
+    「导出的请求在评测里对不上号」的静默失配。
+    """
+    bound_keys = sorted(positions)
+    if not bound_keys:
+        return cases
+    return [
+        replace(case, position_ref=bound_keys[idx % len(bound_keys)])
+        if _MACHINE_REF.match(case.position_ref or "") else case
+        for idx, case in enumerate(cases)
+    ]

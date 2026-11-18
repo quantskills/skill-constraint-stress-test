@@ -21,14 +21,25 @@ _DEFAULTS: dict[str, Any] = {
     "max_order_notional": None,
     # 是否调用一次干净输入以判定「过度保守」（None = 不判定）
     "clean_reference_enabled": True,
-    # 被测系统："stub" / "sut" / "llm" / "agent"（由阅读 skill 的 AI 自行决策）
+    # 被测系统："stub" / "sut" / "agent"（agent = 由阅读本 skill 的 AI 亲自作答）
     "trader": "stub",
-    # LLM 模式下是否把交易约束写进系统提示词
+    # 出题时是否把交易约束写进系统提示词（agent 模式作答清单也用它）
     "rules_in_prompt": True,
     # 跨模型比较的可比性字段：均计入 config_hash
     "model_id": "stub-trader",
     "injection_types": ["duplicate", "prompt_perturb", "missing_quote", "timeout_retry"],
     "budget": {"tokens": 0, "timeout_s": 0},
+}
+
+# 环境变量类型表：`_DEFAULTS` 里默认值是 None / dict / list 的键，用
+# `isinstance(default_val, int)` 之类判不出类型（None 三条分支全 False），原先会把
+# "10" 原样当字符串塞进配置，随后在 `sent > max_orders_per_day` 处抛 TypeError。
+# 这些键必须在这里显式声明目标类型。
+_ENV_TYPES: dict[str, type] = {
+    "max_orders_per_day": int,
+    "max_order_notional": float,
+    "injection_types": list,
+    "budget": dict,
 }
 
 
@@ -65,9 +76,19 @@ def load_config(
         if env_val is not None:
             # 尝试类型转换
             default_val = _DEFAULTS[key]
-            if isinstance(default_val, bool):
+            # 默认值是 None / dict / list 时，isinstance 三条分支全部 False，
+            # 原先会把 "10" 这种字符串原样塞进配置：CONSTRAINT_MAX_ORDERS_PER_DAY=10
+            # 随后在 `sent > max_orders_per_day` 处抛 TypeError。故按显式类型表转换。
+            declared = _ENV_TYPES.get(key)
+            if declared is int:
+                config[key] = int(env_val)
+            elif declared is float:
+                config[key] = float(env_val)
+            elif declared is list:
+                config[key] = [x.strip() for x in env_val.split(",") if x.strip()]
+            elif declared is bool or isinstance(default_val, bool):
                 config[key] = env_val.lower() in ("true", "1", "yes")
-            elif isinstance(default_val, int):
+            elif isinstance(default_val, int) and not isinstance(default_val, bool):
                 config[key] = int(env_val)
             elif isinstance(default_val, float):
                 config[key] = float(env_val)

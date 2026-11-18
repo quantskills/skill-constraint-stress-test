@@ -1,11 +1,19 @@
 """回放引擎测试（v0.2 统计口径修正后）。"""
 
 import json
+import math
 import tempfile
 from pathlib import Path
 
 import pytest
-from scripts.replay_engine import run_evaluation, _compute_config_hash, _mcnemar_test, _confidence_interval
+from scripts.replay_engine import (
+    run_evaluation,
+    _compute_config_hash,
+    _mcnemar_test,
+    _mcnemar_p_values,
+    _MCNEMAR_EXACT_MAX_DISCORDANT,
+    _confidence_interval,
+)
 from scripts.injector import (
     InjectionCase,
     InjectionType,
@@ -165,18 +173,80 @@ class TestRunEvaluation:
 
 
 class TestMcNemarTest:
+    """McNemar 的 p 值口径。
+
+    这里锁的是曾经真实存在的一处结论级缺陷：实现把 df=1 卡方的生存函数又除了
+    一次 2（`erfc(sqrt(chi2/2)) / 2`），p 被系统性低估一半，`b=5, c=0` 从
+    「不显著」被报成「显著」。改回来的同时补上精确二项检验，两条都要有锚点。
+    """
+
+    @staticmethod
+    def _ev(hard: list[str]):
+        return {"hard_violations": hard, "violations": hard}
+
     def test_all_same(self):
-        events = [{"violations": []}] * 10
+        events = [self._ev([])] * 10
         result = _mcnemar_test(events, events)
         assert result["chi2"] == 0.0
         assert result["p_value"] == 1.0
+        assert result["discordant_pairs"] == 0
+        assert result["significant_at_005"] is False
 
-    def test_blocking_effect(self):
-        without = [{"violations": ["x"]}] * 5 + [{"violations": []}] * 5
-        with_checks = [{"violations": []}] * 10
+    def test_five_blocked_zero_introduced_is_not_significant(self):
+        """回归锚点：b=5,c=0 曾经被误判显著（p=0.0368）。"""
+        without = [self._ev(["limit_up"])] * 5 + [self._ev([])] * 5
+        with_checks = [self._ev([])] * 10
         result = _mcnemar_test(with_checks, without)
         assert result["contingency_table"]["only_without"] == 5
+        assert result["contingency_table"]["only_with"] == 0
+        # 精确：2·P(X=5|n=5,p=.5) = 2/32；渐进：erfc(sqrt(3.2/2))
+        assert result["p_value_exact"] == pytest.approx(0.0625, abs=1e-6)
+        assert result["p_value_asymptotic"] == pytest.approx(0.073638, abs=1e-6)
+        assert result["test_used"] == "exact_binomial"
+        assert result["p_value"] == result["p_value_exact"]
+        assert result["significant_at_005"] is False
+
+    def test_asymptotic_p_is_the_chi_square_survival_function(self):
+        """p 不得再被除 2：直接和 erfc(sqrt(chi2/2)) 对账。"""
+        without = [self._ev(["x"])] * 8 + [self._ev([])] * 2
+        with_checks = [self._ev([])] * 10
+        result = _mcnemar_test(with_checks, without)
+        chi2 = (abs(8 - 0) - 1) ** 2 / 8
+        assert result["p_value_asymptotic"] == pytest.approx(
+            math.erfc(math.sqrt(chi2 / 2)), abs=1e-6
+        )
+        # 直接对账函数本身：渐进值必须等于 χ²₁ 生存函数，而不是它的一半
+        _, p_asym, _ = _mcnemar_p_values(8, 0)
+        assert p_asym == pytest.approx(0.013328, abs=1e-6)
+
+    def test_exact_p_hand_computed_cases(self):
+        # b=10, c=0 → 2·(1/2)^10
+        without = [self._ev(["x"])] * 10 + [self._ev([])] * 10
+        with_checks = [self._ev([])] * 20
+        result = _mcnemar_test(with_checks, without)
+        assert result["p_value_exact"] == pytest.approx(2 * 0.5 ** 10, abs=1e-6)
         assert result["significant_at_005"] is True
+
+    def test_pairing_basis_is_hard_violations_not_soft(self):
+        """只有软约束不同时，不得计入不一致对子——与 _verdict 同口径。"""
+        without = [
+            {"hard_violations": [], "violations": ["soft_hint"]} for _ in range(5)
+        ]
+        with_checks = [
+            {"hard_violations": [], "violations": []} for _ in range(5)
+        ]
+        result = _mcnemar_test(with_checks, without)
+        assert result["discordant_pairs"] == 0
+        assert result["p_value"] == 1.0
+
+    def test_large_discordant_count_uses_asymptotic(self):
+        n = _MCNEMAR_EXACT_MAX_DISCORDANT + 5
+        without = [self._ev(["x"])] * n + [self._ev([])] * n
+        with_checks = [self._ev([])] * (2 * n)
+        result = _mcnemar_test(with_checks, without)
+        assert result["discordant_pairs"] == n
+        assert result["test_used"] == "chi2_continuity_correction"
+        assert result["p_value"] == result["p_value_asymptotic"]
 
 
 class TestConfidenceInterval:

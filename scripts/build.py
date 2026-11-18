@@ -101,12 +101,20 @@ def run(input_data: Any, config: Dict[str, Any] | None = None) -> Dict[str, Any]
         if key in params and params[key] is not None:
             merged[key] = params[key]
 
+    # 覆盖优先级「参数 > config > 配置文件 > 默认值」要真的生效：
+    # 此前 merged 除了 output_dir 之外整体被丢弃，调用方传 cases_per_type、
+    # max_position_pct、budget 等一律静默不生效，却仍照常写进报告与哈希。
     return _run_eval(
-        cases_dir=params.get("cases_dir"),
-        config_path=params.get("config_path"),
+        cases_dir=merged.get("cases_dir", params.get("cases_dir")),
+        config_path=merged.get("config_path", params.get("config_path")),
         output_dir=merged.get("output_dir"),
-        market_id=params.get("market_id"),
-        injection_types=params.get("injection_types"),
+        market_id=merged.get("market_id", params.get("market_id")),
+        injection_types=merged.get("injection_types", params.get("injection_types")),
+        **{
+            k: v for k, v in merged.items()
+            if k not in {"cases_dir", "config_path", "output_dir", "market_id",
+                         "injection_types"}
+        },
     )
 
 

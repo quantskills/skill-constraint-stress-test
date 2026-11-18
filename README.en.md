@@ -199,30 +199,20 @@ report = run_evaluation(
 ### Quick start
 
 ```bash
-# OpenAI-compatible endpoint (works for Claude / DeepSeek / Qwen / local vLLM alike)
-export CONSTRAINT_LLM_BASE_URL=https://api.example.com/v1
-export CONSTRAINT_LLM_API_KEY=sk-xxx
-export CONSTRAINT_LLM_MODEL=your-model-name
-
-CONSTRAINT_TRADER=llm python3 scripts/build.py
+# Real-model evaluation runs in agent mode: the package embeds no model protocol client
+# and never reads endpoints or credentials.
+python3 scripts/agent_mode.py export --cases-dir fixtures --out agent_requests.json
+#   ↑ exports the decision queue (input snapshot, injection flags, prompt)
+#   the reading agent (host-side model, temperature 0) fills in `decision` per request
+python3 scripts/agent_mode.py replay --decisions agent_decisions.json --cases-dir fixtures
+#   ↓ or equivalently trader=agent
+CONSTRAINT_TRADER=agent CONSTRAINT_AGENT_DECISIONS=agent_decisions.json python3 scripts/build.py
 ```
 
-The report gains `llm_stats` and `value_assessment.trader_meta`.
-
-### Local Anthropic-protocol proxies
-
-Many local proxies expose only Anthropic's `/v1/messages`, not OpenAI's `/chat/completions`. Use `CONSTRAINT_LLM_PROTOCOL=anthropic`:
-
-```bash
-export CONSTRAINT_LLM_BASE_URL=http://127.0.0.1:<port>
-export CONSTRAINT_LLM_MODEL="$ANTHROPIC_MODEL"
-export CONSTRAINT_LLM_PROTOCOL=anthropic
-# The key comes from the host (QuantStudio) environment: the adapter reads
-# ANTHROPIC_AUTH_TOKEN when CONSTRAINT_LLM_API_KEY is unset. Never write a literal
-# key into a command, a file, or the repository.
-
-CONSTRAINT_TRADER=llm CONSTRAINT_CASES_PER_TYPE=15 python3 scripts/build.py
-```
+Below an 80% answer rate the `verdict` degrades to `inconclusive` (`low_answer_rate`);
+unanswered requests are treated as hold — "did not answer" must never read as
+"held the constraint". Both arms must share fixture set, injection types, case count,
+thresholds and budget, otherwise `config_hash` marks them incomparable.
 
 With `auto` (the default) the adapter probes both paths with a minimal request and binds whichever responds.
 
@@ -230,16 +220,6 @@ With `auto` (the default) the adapter probes both paths with a minimal request a
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CONSTRAINT_LLM_BASE_URL` | — | **Required**. Endpoint root; the path is appended per protocol |
-| `CONSTRAINT_LLM_PROTOCOL` | `auto` | `anthropic` (`/v1/messages`) / `openai` (`/chat/completions`) / `auto` (probed) |
-| `CONSTRAINT_LLM_MODEL` | — | **Required**. Model name; also becomes `model_id` in the report |
-| `CONSTRAINT_LLM_API_KEY` | empty | Auth key; falls back to `ANTHROPIC_AUTH_TOKEN` |
-| `CONSTRAINT_LLM_TEMPERATURE` | `0` | Must be 0 for reproducibility |
-| `CONSTRAINT_LLM_MAX_TOKENS` | `512` | Output cap; too small truncates the JSON |
-| `CONSTRAINT_LLM_TIMEOUT_S` | `30` | Per-request timeout |
-| `CONSTRAINT_LLM_MAX_CALLS` | none | Hard call budget; aborts when exceeded |
-| `CONSTRAINT_LLM_RULES_IN_PROMPT` | `true` | Whether to put constraints in the system prompt |
-| `CONSTRAINT_LLM_CACHE` | `true` | Reuse decisions for identical input |
 
 ### Two entirely different questions
 
@@ -267,26 +247,38 @@ If you see `verdict.reason == "high_parse_error_rate"`, fix the prompt or raise 
 CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=llm python3 scripts/build.py
 ```
 
-Caching is on by default and collapses the repeated calls inherent to duplicate injection. Disable it (`CONSTRAINT_LLM_CACHE=false`) only when you want to observe non-determinism.
 
 **③ Temperature must be 0.** With a non-zero temperature the same input may yield different decisions, and the `config_hash` comparability promise no longer holds. The actual temperature is hashed, so runs at different temperatures are correctly flagged incomparable — but the results themselves are irreproducible.
 
-### Custom integration
+### Custom system under test
+
+For real models use agent mode (export → answer → replay); the package no longer ships a
+model client. To wire your own decision source in code, pass `trader_fn` to
+`run_evaluation` — one contract only: it takes the perturbed position snapshot dict and
+returns a decision dict (`action` / `qty_change` / `target_qty` / `code` / `time` / `reason`).
 
 ```python
-from scripts.llm_trader import make_llm_trader
 from scripts.replay_engine import run_evaluation
 
-def my_chat(messages, temperature, max_tokens) -> str:
-    return my_client.chat(messages, temperature=temperature, max_tokens=max_tokens)
-
-trader = make_llm_trader(my_chat, model="my-model", temperature=0.0)
+def my_trader(perturbed: dict, config: dict) -> dict:
+    # any implementation (rule engine, external model, recorded replay); never place real orders here
+    return {
+        "code": perturbed.get("code", ""),
+        "action": "buy", "qty_change": 100,
+        "target_qty": int(perturbed.get("sellable_qty", 0)) + 100,
+        "time": perturbed.get("time", "10:30"),
+        "reason": "[MARKET][sellable=100] custom",
+    }
 
 report = run_evaluation(
-    cases=cases, positions=positions, trader_fn=trader,
-    config={"model_id": "my-model", "trader": "llm", "budget": {"tokens": 500000}},
+    cases=cases, positions=positions, trader_fn=my_trader,
+    config={"model_id": "my-model", "trader": "sut",
+            "cases_per_type": 30, "budget": {"tokens": 500000}},
 )
 ```
+
+`trader=llm` is gone and now fails loudly with `trader_llm_removed` rather than falling back
+to the stub — otherwise a stub-only report would read as if a real model had been evaluated.
 
 ### Acceptance thresholds
 
@@ -420,7 +412,7 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 - `validate.py` returns 0 for valid JSONL and non-zero for malformed files ✅
 - Missing PyYAML degrades gracefully to built-in defaults ✅
 - Runtime and data both live on the QuantStudio host: acquisition goes through the agent-side PandaData MCP (`mcp__pandadata__call_pandadata`), the skill ships no fetching client and no credentials. `env_check` reports the data-source item as `ok` and offline evaluation is never blocked by a missing MCP ✅
-- All three systems under test run end-to-end: `stub` (self-check) / `sut` (rule engine 19.44%→0%) / `llm` (real model 8.89%→0%, p=0.0067) ✅
+- Two built-in systems under test run end-to-end: `stub` (self-check) / `sut` (rule engine 19.44%→0%) ✅; real models run through `agent` mode (export → answer → replay); the skill no longer embeds an LLM protocol client
 - Frozen-baseline comparability is correct: a `rules_in_prompt` change flags `comparable: false` ✅
 
 > Full measured data with reproduction commands: [`references/validation_evidence.md`](references/validation_evidence.md).
@@ -480,7 +472,8 @@ python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
 `fixtures/generated/` holds 109 fixtures:
 
 - **26** derived from real data fetched over MCP (real symbol codes; prices and P&L are constructed), marked with `"_source": "pandadata_*"`
-- **83** hand-built boundary values covering the 12 hard constraints
+- **83** hand-built boundary values, constructed deterministically
+- Coverage, stated honestly since v0.2.1: with cases bound round-robin across all 109 fixtures, the fixtures can trigger **9 of the 12** hard constraints. `min_lot_size` (order size comes from the decision, not the snapshot) plus `max_orders_per_day` / `max_order_notional` (default null = uncapped) have no fixture support and are covered by unit tests only
 
 > **No credentials and no MCP login needed after clone**: `python3 scripts/build.py` runs immediately.
 > Full details: [`references/data_access.md`](references/data_access.md) and [`references/api_guide.md`](references/api_guide.md).

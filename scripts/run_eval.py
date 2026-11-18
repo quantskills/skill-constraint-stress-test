@@ -5,8 +5,10 @@ CLI 错误契约：stdout 只输出一个纯 JSON 对象，退出码区分 0/1/2
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict
 
@@ -76,7 +78,8 @@ def run(
         generate_missing_quote_cases,
         generate_prompt_perturb_cases,
         generate_timeout_retry_cases,
-    )
+        bind_machine_refs,
+)
     from scripts.replay_engine import run_evaluation
 
     if cases_dir is None:
@@ -102,9 +105,13 @@ def run(
         from scripts.sut_adapter import sut_trader
         trader_fn = sut_trader
     elif trader_name == "llm":
-        from scripts.llm_trader import get_stats, llm_trader_from_env, reset_stats
-        reset_stats()
-        trader_fn = llm_trader_from_env()
+        raise InputValidationError(
+            "trader_llm_removed",
+            "trader=llm（skill 内部直连 LLM 代理）已移除；真实模型评测改走 agent 模式，"
+            "由阅读本 skill 的 agent 亲自作答",
+            hint="python3 scripts/agent_mode.py export → 填写 decisions → "
+                 "python3 scripts/agent_mode.py replay --decisions <file>",
+        )
     elif trader_name == "agent":
         import os as _os
         from scripts.agent_mode import AgentModeError, decisions_trader
@@ -141,12 +148,18 @@ def run(
 
     # 生成注入案例
     all_cases = []
-    active_types = injection_types or [
-        "duplicate",
-        "prompt_perturb",
-        "missing_quote",
-        "timeout_retry",
-    ]
+    # CLI 参数 > 配置文件/环境变量 > 默认四类。此前配置文件里的 injection_types
+    # 只进 config_hash、不参与案例选择——改它等于只改哈希不改行为。
+    active_types = (
+        injection_types
+        or config.get("injection_types")
+        or [
+            "duplicate",
+            "prompt_perturb",
+            "missing_quote",
+            "timeout_retry",
+        ]
+    )
 
     if "duplicate" in active_types:
         all_cases.extend(generate_duplicate_cases({}, cases_per_type))
@@ -166,6 +179,7 @@ def run(
 
     # 加载 positions
     positions: dict[str, dict] = {}
+    position_origin: dict[str, str] = {}
     cases_path = Path(cases_dir)
     for subdir in ["generated", "manual"]:
         sub = cases_path / subdir
@@ -173,7 +187,9 @@ def run(
             for f in sorted(sub.glob("*.json")):
                 try:
                     data = json.loads(f.read_text())
-                    positions[f"position_{len(positions):04d}"] = data
+                    key = f"position_{len(positions):04d}"
+                    positions[key] = data
+                    position_origin[key] = f"{subdir}/{f.name}"
                 except (json.JSONDecodeError, OSError):
                     continue
 
@@ -184,28 +200,46 @@ def run(
             if v.get("market_id", "CN_A_STOCK") == market_id
         }
 
+    # 夹具指纹：把「实际参与评测的是哪些数据」绑进 config_hash。
+    # 此前 fixtures_fingerprint 参与哈希却在全仓没有任何赋值点，永远取到 None——
+    # 换掉整套夹具哈希都不变，compare_baseline 照样判「可比」，可比性在数据面形同虚设。
+    digest = hashlib.sha256()
+    for key in sorted(positions):
+        digest.update(key.encode())
+        digest.update(b"\0")
+        digest.update(position_origin.get(key, "?").encode())
+        digest.update(b"\0")
+        digest.update(
+            json.dumps(positions[key], sort_keys=True, default=str).encode()
+        )
+        digest.update(b"\0")
+    config["fixtures_fingerprint"] = digest.hexdigest()[:16]
+    config["fixture_count"] = len(positions)
 
-    # llm 模式下，模型标识与温度以环境变量为准，保证 config_hash 反映真实配置
-    if trader_name == "llm":
-        import os as _os
-        if _os.environ.get("CONSTRAINT_LLM_MODEL"):
-            config["model_id"] = _os.environ["CONSTRAINT_LLM_MODEL"]
-            config["model_id_explicit"] = True
-        if not config.get("model_id_explicit"):
-            config["model_id"] = "llm-trader"
-        if "model_temperature" not in config or config.get("model_temperature") == 0:
-            try:
-                config["model_temperature"] = float(
-                    _os.environ.get("CONSTRAINT_LLM_TEMPERATURE", "0")
-                )
-            except ValueError:
-                pass
-        # rules_in_prompt 以环境变量为准，否则报告会与实际 prompt 不符
-        if "CONSTRAINT_LLM_RULES_IN_PROMPT" in _os.environ:
-            config["rules_in_prompt"] = _os.environ[
-                "CONSTRAINT_LLM_RULES_IN_PROMPT"
-            ].lower() in ("1", "true", "yes")
 
+    # 绑定：把案例分散到**实际载入的夹具**上。
+    # 生成器只写 position_{i:04d}，而 positions 的编号来自「按文件名排序后依次编号」，
+    # 于是四类案例全部挤在排序最靠前的 cases_per_type 个夹具上：其余夹具一条都进不了
+    # 引擎，而且「哪几个夹具参与」取决于文件名首字母，与案例想考的约束毫无关系。
+    # 只覆盖机器分配的 ref（^position_\d{4}$），调用方显式绑定的原样保留。
+    all_cases = bind_machine_refs(all_cases, positions)
+    # 「实际绑定到多少个夹具」必须报出来：fixture_count 只是载入总数，两者不等时
+    # 覆盖类说法只对已绑定的部分成立。
+    config["fixtures_bound"] = len({c.position_ref for c in all_cases})
+
+    # 案例引用的夹具必须存在，否则引擎会静默退回「第一个夹具」甚至硬编码假持仓。
+    # 先在这里拦住：宁可结构化报错，也不要产出一堆「跑在别的数据上」的评测结论。
+    unbound = sorted({
+        c.position_ref for c in all_cases
+        if positions and c.position_ref not in positions
+    })
+    if unbound:
+        raise InputValidationError(
+            "position_ref_unbound",
+            f"{len(unbound)} 个案例引用了不存在的夹具：{unbound[:5]}",
+            hint=f"cases_dir={cases_dir} 实际载入 {len(positions)} 个夹具；"
+                 "请检查 injection_types 配比与夹具数量是否匹配",
+        )
     # model_id 未显式配置时按被测系统推断，避免「换了 trader 但哈希不变」
     if not config.get("model_id_explicit"):
         default_model = "stub-trader" if trader_name == "stub" else f"{trader_name}-trader"
@@ -254,37 +288,6 @@ def run(
         if output_dir:
             with open(Path(output_dir) / "report.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, ensure_ascii=False, indent=2)
-
-    # LLM 模式下把调用统计并入报告；解析失败率过高时降级 verdict
-    if trader_name == "llm":
-        from scripts.llm_trader import get_stats
-        stats = get_stats()
-        report["llm_stats"] = stats
-        report["value_assessment"]["trader_meta"] = {
-            "kind": "llm",
-            "model_id": config.get("model_id"),
-            "temperature": config.get("model_temperature"),
-            "rules_in_prompt": config.get("rules_in_prompt", True),
-            "stats": stats,
-        }
-        # 解析失败率 > 20% 时，决策并非模型真实意图，结论不可信
-        if stats.get("parse_error_rate", 0) > 0.2:
-            report["value_assessment"]["verdict"] = {
-                "verdict": "inconclusive",
-                "reason": "high_parse_error_rate",
-                "significant": False,
-                "p_value": report.get("mcnemar_test", {}).get("p_value", 1.0),
-                "actionable": False,
-                "note": (
-                    f"模型输出解析失败率 {stats['parse_error_rate']:.2%} 过高，"
-                    "决策无法代表模型真实意图；请检查提示词与输出格式，"
-                    "或提高 max_tokens 后重跑。"
-                ),
-            }
-        if output_dir:
-            with open(Path(output_dir) / "report.json", "w", encoding="utf-8") as f:
-                json.dump(report, f, ensure_ascii=False, indent=2)
-
     return report
 
 

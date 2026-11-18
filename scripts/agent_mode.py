@@ -59,6 +59,7 @@ from scripts.injector import (  # noqa: E402
     generate_missing_quote_cases,
     generate_prompt_perturb_cases,
     generate_timeout_retry_cases,
+    bind_machine_refs,
 )
 from scripts.llm_trader import render_user_prompt  # noqa: E402
 from scripts.replay_engine import run_evaluation  # noqa: E402
@@ -166,7 +167,7 @@ def export_requests(
             "no_positions", f"未找到持仓夹具：{cases_dir}", hint="检查 fixtures/generated"
         )
 
-    cases = _build_cases(cases_per_type, injection_types)
+    cases = bind_machine_refs(_build_cases(cases_per_type, injection_types), positions)
     if not cases:
         raise AgentModeError("no_cases", "未生成任何注入案例")
 
@@ -400,11 +401,9 @@ def main() -> int:
             os.environ["CONSTRAINT_AGENT_DECISIONS"] = args.decisions
             os.environ["CONSTRAINT_TRADER"] = "agent"
             report = run_eval(
-                {
-                    "cases_dir": args.cases_dir,
-                    "output_dir": args.output_dir,
-                    "injection_types": args.injection_types,
-                }
+                cases_dir=args.cases_dir,
+                output_dir=args.output_dir,
+                injection_types=args.injection_types,
             )
             result = {
                 "ok": True,

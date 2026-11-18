@@ -222,20 +222,10 @@ report = run(input_data={"cases_dir": "fixtures/"}, config=None)
 ## Verification
 
 ```bash
-python3 -m pytest tests/ -v
-python3 scripts/env_check.py --self-check --json
-python3 scripts/build.py
-```
-
-Expected: all tests pass, self-check emits structured JSON, `output/report.json` is produced.
-
-## Connect a real LLM
-
-```bash
-export CONSTRAINT_LLM_BASE_URL=https://api.example.com/v1
-export CONSTRAINT_LLM_API_KEY=sk-xxx
-export CONSTRAINT_LLM_MODEL=model-name
-CONSTRAINT_TRADER=llm CONSTRAINT_CASES_PER_TYPE=3 python3 scripts/build.py
+# 真实模型评测走 agent 模式（本包不内置模型客户端、不需要端点与密钥）
+python3 scripts/agent_mode.py export --cases-dir fixtures --out agent_requests.json
+# 由宿主侧 agent 逐条作答后回填：
+python3 scripts/agent_mode.py replay --decisions agent_decisions.json --cases-dir fixtures
 ```
 
 ## Value acceptance workflow

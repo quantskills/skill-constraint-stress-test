@@ -99,6 +99,28 @@ class TestDuplicateOrder:
     def test_different_qty_is_not_duplicate(self):
         assert check_duplicate_action(_buy(100), [_buy(200)]) is False
 
+    # --- time_window_seconds 必须真的影响判定（早期实现收下不用 = 装饰性旋钮） ---
+
+    def test_same_minute_is_within_default_window(self):
+        cur = dict(_buy(), time="10:30")
+        assert check_duplicate_action(cur, [dict(_buy(), time="10:30")]) is True
+
+    def test_far_apart_is_outside_default_window(self):
+        cur = dict(_buy(), time="10:35")
+        assert check_duplicate_action(cur, [dict(_buy(), time="10:30")]) is False
+
+    def test_widening_the_window_changes_the_verdict(self):
+        """同一个输入只有窗口不同，结论必须不同——否则旋钮仍是假的。"""
+        cur = dict(_buy(), time="10:35")
+        hist = [dict(_buy(), time="10:30")]
+        assert check_duplicate_action(cur, hist, time_window_seconds=5.0) is False
+        assert check_duplicate_action(cur, hist, time_window_seconds=300.0) is True
+
+    def test_missing_time_is_conservatively_in_window(self):
+        """没有时间信息不许冒充「不在窗口内」，否则真实重复会被判成不违规。"""
+        assert check_duplicate_action(dict(_buy(), time="10:30"), [_buy()]) is True
+        assert check_duplicate_action(_buy(), [dict(_buy(), time="10:30")]) is True
+
 
 class TestOrderCaps:
     def test_daily_order_cap(self):

@@ -279,6 +279,23 @@ def evaluate_constraints(
     return results
 
 
+def _time_to_seconds(value: Any) -> float | None:
+    """把 `HH:MM` / `HH:MM:SS` 换算成当日秒数；无法解析返回 None。"""
+    if not isinstance(value, str) or ":" not in value:
+        return None
+    parts = value.strip().split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+        second = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return None
+    if not (0 <= hour < 24 and 0 <= minute < 60 and 0 <= second < 60):
+        return None
+    return hour * 3600 + minute * 60 + second
+
+
 def check_duplicate_action(
     current_decision: dict,
     history: list[dict],
@@ -293,7 +310,15 @@ def check_duplicate_action(
     Args:
         current_decision: 当前决策
         history: 历史决策列表（按时间倒序，只含实际发出的委托）
-        time_window_seconds: 判定窗口（秒）
+        time_window_seconds: 判定窗口（秒）。**必须真的参与判定**——早期实现
+            收下这个参数却从不使用，等于「全历史窗口」，而文档写的是 5 秒：
+            调它只改 config_hash 不改行为，是一个装饰性旋钮。
+
+    时间口径（必须写清，否则读者会以为有秒级精度）：
+    - 时钟取自决策自身的 `time` 字段（快照/决策给出的 `HH:MM`），**粒度是分钟**；
+      因此默认 5 秒窗口的实际语义是「同一时间戳内的重复委托」。
+    - 任一侧 `time` 缺失或无法解析时，保守判为窗口内（继续算重复）——
+      「不知道时间」不许冒充「不在窗口内」，否则会把真实重复漏成不违规。
 
     Returns:
         True 表示检测到重复
@@ -307,6 +332,7 @@ def check_duplicate_action(
         return False
 
     cur_code = current_decision.get("code", "")
+    cur_seconds = _time_to_seconds(current_decision.get("time"))
 
     for prev in history:
         if (
@@ -314,6 +340,10 @@ def check_duplicate_action(
             and prev.get("action") == cur_action
             and prev.get("qty_change") == cur_qty
         ):
-            return True
+            prev_seconds = _time_to_seconds(prev.get("time"))
+            if cur_seconds is None or prev_seconds is None:
+                return True
+            if abs(cur_seconds - prev_seconds) <= time_window_seconds:
+                return True
 
     return False

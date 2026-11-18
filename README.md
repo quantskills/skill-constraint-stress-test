@@ -169,63 +169,21 @@ python3 scripts/validate.py output/events_with_checks.jsonl --json
 默认 `trader: stub` 使用内置桩件（固定返回 hold），只能验证评测链路本身。要评测真实的 AI 交易员：
 
 ```bash
-# 方式一：配置开关，使用 scripts/sut_adapter.py
-CONSTRAINT_TRADER=sut python3 scripts/build.py
-
-# 被测系统目录默认为同级的 skill-intraday-position-manager/scripts
-# 也可显式指定：
-CONSTRAINT_TRADER=sut \
-CONSTRAINT_SUT_SCRIPTS=/path/to/skill-xxx/scripts \
-python3 scripts/build.py
+# 真实模型评测走 agent 模式：本包不内置任何模型协议客户端，也不读写端点与密钥
+python3 scripts/agent_mode.py export --cases-dir fixtures --out agent_requests.json
+#   ↑ 导出待决策清单（每条含输入快照、注入标记与提示词）
+#   由阅读本 skill 的 agent（宿主侧模型，温度 0）逐条填写 decision 字段
+python3 scripts/agent_mode.py replay --decisions agent_decisions.json --cases-dir fixtures
+#   ↓ 也可以直接用 trader=agent
+CONSTRAINT_TRADER=agent CONSTRAINT_AGENT_DECISIONS=agent_decisions.json python3 scripts/build.py
 ```
 
-```python
-# 方式二：直接传 trader_fn
-from scripts.replay_engine import run_evaluation
-
-def my_trader(perturbed_input, config):
-    return my_decision_engine(perturbed_input)
-
-report = run_evaluation(
-    cases=cases, positions=positions, trader_fn=my_trader,
-    config={"model_id": "my-model", "budget": {"tokens": 4096, "timeout_s": 30}},
-)
-```
-
-> 被测系统必须返回决策 dict。**返回值只被记录与判定，永远不会被执行**。
-
-## 测试真实 LLM 交易员
-
-前三种被测系统（`stub` / `sut`）都不是大模型。要评测**真实 LLM**，用 `trader: llm`。
-
-### 快速开始
-
-```bash
-# 以 OpenAI 兼容端点为例（Claude / DeepSeek / Qwen / 本地 vLLM 同理）
-export CONSTRAINT_LLM_BASE_URL=https://api.example.com/v1
-export CONSTRAINT_LLM_API_KEY=sk-xxx
-export CONSTRAINT_LLM_MODEL=your-model-name
-
-CONSTRAINT_TRADER=llm python3 scripts/build.py
-```
-
-### 接入本机 LLM 代理（Anthropic 协议）
-
-很多本地代理只暴露 Anthropic 的 `/v1/messages`，不提供 OpenAI 的 `/chat/completions`。这类端点用 `CONSTRAINT_LLM_PROTOCOL=anthropic`：
-
-```bash
-export CONSTRAINT_LLM_BASE_URL=http://127.0.0.1:<port>
-export CONSTRAINT_LLM_MODEL="$ANTHROPIC_MODEL"
-export CONSTRAINT_LLM_PROTOCOL=anthropic
-# 密钥由宿主（QuantStudio）环境注入：ANTHROPIC_AUTH_TOKEN 缺省时代码自动读取它，
-# 不要把密钥值写进命令、文件或版本库。
-
-CONSTRAINT_TRADER=llm CONSTRAINT_CASES_PER_TYPE=15 python3 scripts/build.py
-```
+作答率低于 80% 时 `verdict` 会降级为 `inconclusive`（原因 `low_answer_rate`），
+未作答部分按 hold 处理——不许把「没答」当成「守住了约束」。对照臂与实验臂的夹具集、
+注入类型、案例数、阈值与预算必须一致，否则 `config_hash` 判不可比。
 
 密钥缺省时会自动读取 `ANTHROPIC_AUTH_TOKEN`，因此若代理配置已在环境里，只需设 `BASE_URL` 与 `MODEL`。
 
-不确定端点用哪种协议时，留 `CONSTRAINT_LLM_PROTOCOL=auto`（默认），代码会先用最小请求实测，哪边通就用哪边。
 
 报告里会多出 `llm_stats` 和 `value_assessment.trader_meta`：
 
@@ -244,16 +202,6 @@ CONSTRAINT_TRADER=llm CONSTRAINT_CASES_PER_TYPE=15 python3 scripts/build.py
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `CONSTRAINT_LLM_BASE_URL` | — | **必填**，端点根地址（路径由协议自动补） |
-| `CONSTRAINT_LLM_PROTOCOL` | `auto` | `anthropic`（`/v1/messages`）/ `openai`（`/chat/completions`）/ `auto`（实测探测） |
-| `CONSTRAINT_LLM_MODEL` | — | **必填**，模型名；同时作为报告里的 `model_id` |
-| `CONSTRAINT_LLM_API_KEY` | 空 | 鉴权密钥；缺省时回退读取 `ANTHROPIC_AUTH_TOKEN` |
-| `CONSTRAINT_LLM_TEMPERATURE` | `0` | 必须为 0 才能保证可复现 |
-| `CONSTRAINT_LLM_MAX_TOKENS` | `512` | 单次输出上限；太小会导致 JSON 被截断 |
-| `CONSTRAINT_LLM_TIMEOUT_S` | `30` | 单次请求超时 |
-| `CONSTRAINT_LLM_MAX_CALLS` | 无 | 总调用上限，超限即中止，防止烧预算 |
-| `CONSTRAINT_LLM_RULES_IN_PROMPT` | `true` | 是否把交易约束写进系统提示词（见下） |
-| `CONSTRAINT_LLM_CACHE` | `true` | 同一输入是否复用上次决策 |
 
 ### 两种截然不同的问题
 
@@ -283,29 +231,38 @@ if parse_error_rate > 0.2:
 CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=llm python3 scripts/build.py
 ```
 
-缓存默认开启，能把 `duplicate` 注入的重复调用全部折叠。若要观测模型非确定性，关掉它（`CONSTRAINT_LLM_CACHE=false`）。
 
 **③ 温度必须为 0。** 温度非 0 时同一输入可能得到不同决策，`config_hash` 的可比性承诺就失效了。代码会把实际温度写进 `config_hash`，所以不同温度的两次运行不会被判定为可比——但代价是结果本身不可复现。
 
-### 自定义接入
+### 自定义被测系统
 
-若端点不兼容 OpenAI 格式，或想用别的客户端实现：
+真实模型请用 agent 模式（出题→作答→回填），本包不再提供模型客户端。若要在代码里
+自己接一个被测决策器，直接传 `trader_fn` 给 `run_evaluation`——契约只有一个：
+输入是扰动后的持仓快照 dict，输出是决策 dict（`action` / `qty_change` / `target_qty` /
+`code` / `time` / `reason`）。
 
 ```python
-from scripts.llm_trader import make_llm_trader
 from scripts.replay_engine import run_evaluation
 
-def my_chat(messages, temperature, max_tokens) -> str:
-    # 任意实现，只要返回模型输出的文本
-    return my_client.chat(messages, temperature=temperature, max_tokens=max_tokens)
-
-trader = make_llm_trader(my_chat, model="my-model", temperature=0.0)
+def my_trader(perturbed: dict, config: dict) -> dict:
+    # 任意实现（规则引擎、外部模型、回放录制均可），不得在此发起真实下单
+    return {
+        "code": perturbed.get("code", ""),
+        "action": "buy", "qty_change": 100,
+        "target_qty": int(perturbed.get("sellable_qty", 0)) + 100,
+        "time": perturbed.get("time", "10:30"),
+        "reason": "[MARKET][sellable=100] 自定义决策",
+    }
 
 report = run_evaluation(
-    cases=cases, positions=positions, trader_fn=trader,
-    config={"model_id": "my-model", "trader": "llm", "budget": {"tokens": 500000}},
+    cases=cases, positions=positions, trader_fn=my_trader,
+    config={"model_id": "my-model", "trader": "sut",
+            "cases_per_type": 30, "budget": {"tokens": 500000}},
 )
 ```
+
+`trader=llm` 已移除，传入会显式报错 `trader_llm_removed`，不会静默退回桩件——
+否则一份跑在桩件上的报告看起来像跑在真实模型上。
 
 ### 接入后的验收标准
 
@@ -473,7 +430,7 @@ python3 scripts/compare_baseline.py list
 - `validate.py` 对合法 JSONL 返回 0，对畸形文件返回非 0 ✅
 - 缺 PyYAML 时优雅降级到内置默认值 ✅
 - 运行环境与数据都在 QuantStudio 侧：取数走 agent 侧 PandaData MCP（`mcp__pandadata__call_pandadata`），skill 内零凭证；`env_check` 的数据源项恒为 ok，离线评测不因 MCP 缺失而阻塞 ✅
-- 三种被测系统均端到端跑通：`stub`（自检）/ `sut`（规则引擎 19.44%→0%）/ `llm`（真实模型 8.89%→0%，p=0.0067）✅
+- 两种内置被测系统端到端跑通：`stub`（自检）/ `sut`（规则引擎 19.44%→0%）✅；真实模型走 `agent` 模式（出题→作答→回填重放），skill 内**不再**内置 LLM 协议客户端
 - 冻结基线可比性判定正确：`rules_in_prompt` 变化时标 `comparable: false` ✅
 
 > 完整实测数据（含复现命令）见 [`references/validation_evidence.md`](references/validation_evidence.md)。
@@ -531,7 +488,8 @@ python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
 `fixtures/generated/` 共 109 个夹具：
 
 - **26 个**由 MCP 取回的真实数据衍生（标的代码真实，价格与盈亏是构造值），带 `"_source": "pandadata_*"` 标记
-- **83 个**为手工合成的边界值，确定性构造，覆盖 12 条硬约束
+- **83 个**为手工合成的边界值，确定性构造
+- 覆盖口径（v0.2.1 起如实拆分）：案例经 round-robin 绑定全部 109 个夹具后，夹具能支撑触发其中 **9 条**硬约束；`min_lot_size`（下单量来自决策而非持仓快照）、`max_orders_per_day`、`max_order_notional`（默认配置为 null＝不限制，需显式开启）三条无夹具支撑，只能靠单测覆盖
 
 > **clone 后无需任何凭证、无需登录 MCP 即可运行**：`python3 scripts/build.py` 直接可用。
 > 完整说明见 [`references/data_access.md`](references/data_access.md) 与 [`references/api_guide.md`](references/api_guide.md)。
