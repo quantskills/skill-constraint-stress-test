@@ -16,7 +16,6 @@ venv/
 .DS_Store
 
 # Skill runtime output
-output/
 
 # 冻结基线：**随包发布**。job 的交付要求里有「冻结基线对照」，而住在被 ignore 目录里的
 # 基线对 `git clone` 安装的人根本不存在（本轮实测差点把唯一的真实模型运行锚点丢掉）。

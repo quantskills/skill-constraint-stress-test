@@ -1,3 +1,15 @@
+## [0.3.3] — 2026-11-19
+
+### Fixed
+- **修正 0.3.2 的一处虚假交付**：那次提交声称已随包发布 `output/report.json` 与
+  `output/agent_decisions_host.json`，实际**一个都没进包**。根因是 `.gitignore` 里
+  整目录排除 `output/` 仍然存在，我却在文件末尾追加了 `output/*` + `!output/report.json`——
+  git 对被整体忽略的目录**不会**再放行其中任何文件，negation 全部失效。
+  现删除 `output/` 那一行，改为 `output/*` 加两条点名放行，并用 `git ls-files` 实证。
+- 自查方式也跟着修正：原先用 `git ls-files | grep output/ | grep -v <放行清单>` 判断，
+  当没有任何 output 文件被跟踪时该管道输出为空、退出码非零，会**打印出「OK」的假绿**。
+  改为断言 `git ls-files` 必须**包含**那两个路径。
+
 ## [0.3.2] — 2026-11-19
 
 ### Added

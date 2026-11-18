@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: skill-constraint-stress-test
   description: AI trader constraint stress test and fault-injection replay. Injects duplicate input, prompt perturbation, missing quotes, and timeout/retry faults, then replays decisions with and without a constraint-validation layer to report violation rate, duplicate-action rate, refusal count, and ARR/RRR/NNT effect sizes.
-  version: 0.3.2
+  version: 0.3.3
 
 x-skill-info:
   name: skill-constraint-stress-test
