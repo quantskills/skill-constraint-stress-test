@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",

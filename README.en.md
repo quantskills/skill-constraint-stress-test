@@ -407,7 +407,7 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 ## Acceptance Status
 
 - `python3 scripts/build.py` runs standalone ✅
-- `python3 -m pytest tests/ -v` — **219 passing** ✅
+- `python3 -m pytest tests/ -v` — **221 passing** (incl. 4 doc-reconciliation guards) ✅
 - `env_check.py --self-check` emits structured JSON with non-zero exit on blockers ✅
 - `validate.py` returns 0 for valid JSONL and non-zero for malformed files ✅
 - Missing PyYAML degrades gracefully to built-in defaults ✅

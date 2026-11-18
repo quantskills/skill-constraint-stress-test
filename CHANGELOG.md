@@ -1,3 +1,22 @@
+## [0.4.3] — 2026-11-19
+
+### Fixed
+- **文档用例数与逐文件表长期失真**：0.3.x 的 5 刀重构改掉了用例分布
+  （`test_llm_trader.py` 24 → 13：代理 LLM 通道被删；`test_metrics.py` 37 → 41；
+  `test_replay_engine.py` 11 → 16：补 McNemar 精确/渐近 p、配对口径、极小 p 不归零），
+  但 `README.md` / `README.en.md` / `references/data_access.md` 仍写 219，
+  `references/validation_evidence.md` 的头部计数与逐文件表也停在旧值。
+  现在全部按 `pytest --collect-only` 实测改为 **221**，表内三行的数字与描述同步更新
+  （`test_llm_trader.py` 不再声称覆盖 Anthropic 协议——那部分实现已删除）。
+
+### Added
+- `tests/test_doc_counts.py`（4 例）：把「文档 == 实测」钉成断言——两份 README 的套件总数、
+  `data_access.md` 的 CI 用例数、证据文档头部的 用例总数/通过/失败、以及逐文件表的
+  **漏列 / 多列 / 数字过期**三类失真。此前 cst 没有任何文档对账测试，这类过期全靠人眼，
+  而 219 恰好是审核方最容易照着复跑的第一个数字。
+
+---
+
 ## [0.4.2] — 2026-11-19
 
 ### Added

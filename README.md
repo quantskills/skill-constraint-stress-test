@@ -425,7 +425,7 @@ python3 scripts/compare_baseline.py list
 ## 验收状态
 
 - `python3 scripts/build.py` 独立可运行 ✅
-- `python3 -m pytest tests/ -v` — **219 例全绿** ✅
+- `python3 -m pytest tests/ -v` — **221 例全绿**（含 4 例文档对账守卫） ✅
 - `env_check.py --self-check` 输出结构化 JSON，阻塞项非 0 退出 ✅
 - `validate.py` 对合法 JSONL 返回 0，对畸形文件返回非 0 ✅
 - 缺 PyYAML 时优雅降级到内置默认值 ✅

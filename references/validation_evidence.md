@@ -12,8 +12,8 @@ python3 -m pytest tests/ -q
 
 | 项 | 结果 |
 |---|---|
-| 用例总数 | 219 |
-| 通过 | 219 |
+| 用例总数 | 221 |
+| 通过 | 221 |
 | 失败 | 0 |
 | 环境 | Python 3.11.16 |
 
@@ -22,15 +22,16 @@ python3 -m pytest tests/ -q
 | 文件 | 用例数 | 覆盖 |
 |---|---|---|
 | `test_constraints_evaluator.py` | 27 | 12 条硬约束 + 1 条软约束的判定 |
-| `test_metrics.py` | 37 | 分类型指标、价值验收、verdict 分支、配置哈希 |
-| `test_llm_trader.py` | 24 | LLM 解析、缓存、预算、Anthropic 协议 |
+| `test_metrics.py` | 41 | 分类型指标、价值验收、verdict 分支、配置哈希 |
+| `test_llm_trader.py` | 13 | 输出解析（裸 JSON / 围栏 / 带前言）、非法动作回落 hold、价格只从输入抄、扰动与重试标记、内部键不外泄、规则是否入 prompt 两种口径 |
 | `test_market_rules.py` | 19 | 五个市场的规则实现 |
 | `test_injector.py` | 13 | 四类故障注入 |
 | `test_compare_baseline.py` | 11 | 冻结基线 freeze/compare/list |
-| `test_replay_engine.py` | 11 | 回放与聚合 |
+| `test_replay_engine.py` | 16 | 回放与聚合、确定性与 block 开关、校验层降低违反率、**McNemar 精确/渐近 p 口径**、配对基于硬违反、极小 p 不得报成 0、零不一致不算显著 |
 | `test_validate.py` | 10 | 事件契约校验 |
 | `test_mcp_source.py` | 48 | MCP 信封两种形态、截断拒绝、缺列、ok=false、导出加载（全程离线） |
 | `test_agent_mode.py` | 14 | agent 模式的参数暴露、导出契约与运行时对齐 |
+| `test_doc_counts.py` | 4 | 文档套件总数 / CI 用例数 / 证据头部计数 / 逐文件表与实收集一致 |
 | `test_preflight.py` | 5 | **前置检查小节存在且覆盖宿主前提**、**排在所有可执行流程之前**、**取新数据与离线评测两条线路的阻塞语义分明**、**桩件结论不得写成交易员表现**、**文档不再描述取数组件与凭证通道** |
 
 ---

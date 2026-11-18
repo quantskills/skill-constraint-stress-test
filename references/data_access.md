@@ -286,7 +286,7 @@ hk_normal / future_margin / crypto_t0   3   跨市场样例
 - `constraints_evaluator.py`、`replay_engine.py`、`injector.py`、`mcp_source.py` 全部**纯标准库**
 - `mcp_source.py` 只读本地 JSON，不发起任何网络请求
 - `env_check.py` 的 `mcp_data_source` 检查项**恒为 ok**：数据由 agent 侧 MCP 获取，缺失 MCP 也不会 blocked
-- CI 不安装任何取数组件，219 个测试在 1 秒内跑完
+- CI 不安装任何取数组件，221 个测试在 1 秒内跑完
 
 **所以**：clone 之后直接 `python3 scripts/build.py` 就能跑，无需申请账号、无需登录 MCP。
 
