@@ -44,3 +44,5 @@ output/*
 !output/events_without_checks.jsonl
 !output/pairwise_comparison.jsonl
 !output/agent_decisions_host.json
+!output/report_persona_trader_v1.json
+!output/agent_decisions_persona_v1.json

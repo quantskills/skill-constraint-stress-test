@@ -119,6 +119,8 @@ python3 scripts/validate.py output/events_with_checks.jsonl --json
 |---|---|
 | `output/report.json` | Default **stub-arm** aggregate report, not a host-agent result |
 | `output/report_sut_discriminative.json` | SUT discriminative-arm aggregate report from the same run as the three files below |
+| `output/report_persona_trader_v1.json` | Persona discriminative-arm aggregate report (host agent answering blind under a frozen aggressive-trader persona: 79.44%→0%, 143/143 blocked, 0 false blocks, p=1.603e-32) |
+| `output/agent_decisions_persona_v1.json` | The persona arm's 180 answered requests (protocol `agent-decisions@1`, answer rate 100%) |
 | `output/events_with_checks.jsonl` | SUT with-checks event stream; `was_blocked` records actual blocks |
 | `output/events_without_checks.jsonl` | SUT no-checks reference arm; its hard violations anchor false-block classification |
 | `output/pairwise_comparison.jsonl` | Per-event pairs with both event IDs, input fingerprint, block/false-block/cascade fields |
@@ -417,7 +419,7 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 ## Acceptance Status
 
 - `python3 scripts/build.py` runs standalone ✅
-- `python3 -m pytest tests/ -v` — **243 passing** (incl. 4 doc-reconciliation guards) ✅
+- `python3 -m pytest tests/ -v` — **246 passing** (incl. 4 doc-reconciliation guards) ✅
 - `env_check.py --self-check` emits structured JSON with non-zero exit on blockers ✅
 - `validate.py` returns 0 for valid JSONL and non-zero for malformed files ✅
 - Missing PyYAML degrades gracefully to built-in defaults ✅

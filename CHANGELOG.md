@@ -1,3 +1,36 @@
+## [0.6.0] — 2026-11-21
+
+新增**第四个被测臂 `persona-trader-v1`**——用「自建被测对象」的合规路径补强价值证据：
+不是给 JEV 专用模型或 Flash 找替身（两行继续 `not_evaluated`），而是把宿主 agent
+在冻结人格下的盲测作答单列成臂。
+
+### Added（persona 臂：激进交易人格的判别证据）
+- `config/personas/persona_trader_v1.md`：**先冻结、后作答**的人格规范
+  （sha256 `5c94b10f1430be4ad02ddb92cbc2fe60e28cdab5ab7e588b6e1eef2dae72d540`）。
+  六条偏好（行动优先 / 盈亏驱动 / 仓位敢打 / 成交焦虑补单 / 旧价锚定 / 扰动免疫）
+  模拟真实交易员的典型行为张力，**不指示违规**——违规是否发生由作答实证决定。
+- 作答由隔离子代理完成：只读人格文件与题目清单，未接触 `scripts/` 判定器（结构性盲测）；
+  180/180 作答、同输入同答（等价温度 0）。
+- 结果（同预算同夹具，与宿主中性臂直接可比）：**79.44% → 0%**，
+  143/143 全拦、0 误拦、`cascade_unblocked=0`、NNT=1.26、渐进 p=1.603e-32、
+  精确 p=1.794e-43，verdict=`positive`。拦下违规构成：force_close_window 35、
+  limit_up_down 38、duplicate_order 20、st_filter 20、quote_required 20、
+  suspended_filter 19、position_limit 1；改写 buy→hold 82、sell→hold 61，
+  `suppressed_qty=1,111,900`。
+- 三臂合读：作答者越像会犯错的真实交易员，校验层价值越大
+  （中性 agent 0.56% → sut 规则引擎 37.5% → 激进人格 79.44%，校验后全部归零、零误拦）。
+- 随包证据：`output/report_persona_trader_v1.json`、作答原件
+  `output/agent_decisions_persona_v1.json`、冻结锚点 `baselines/persona_trader_v1.json`
+  （含 persona sha256、盲测声明、复现步骤与「LLM 作答不保证逐位可复现，漂移应单列
+  不覆盖」的口径）；`.gitignore` 点名放行两件 output 证据。
+- `skill.json` 依赖表插入 `persona-trader-v1` 行（`evaluated`，含诚实声明：
+  prompt-assembled、绑定宿主模型版本、不是任何厂商模型替身）；
+  `jev-dedicated` 与 `flash` 保持 `not_evaluated`。
+- 新增 `tests/test_persona_arm.py`（3 例）：锚点 persona sha256 与人格文件一致、
+  依赖表诚实性（persona 行自述非替身 + jev/flash 仍 not_evaluated）、
+  报告内部对账（block_rate/false_block_rate/McNemar 与 summary 一致、answer_rate=1.0）。
+- `references/validation_evidence.md` 新增 §2ter-bis；SKILL.md 与两份 README 同步。
+
 ## [0.5.1] — 2026-11-21
 
 独立评审（以审核方视角）通过的补丁版本。0.5.0 的功能与结论不变，本条只修评审

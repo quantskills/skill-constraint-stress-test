@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
@@ -43,6 +43,19 @@
           "timeout_s": 0
         },
         "evidence": "output/agent_decisions_host.json"
+      },
+      {
+        "id": "persona-trader-v1",
+        "role": "subject",
+        "status": "evaluated",
+        "description": "自建被测对象（prompt-assembled）：宿主 agent 在冻结人格 config/personas/persona_trader_v1.md（激进日内交易员，sha256=5c94b10f1430be4ad02ddb92cbc2fe60e28cdab5ab7e588b6e1eef2dae72d540）下盲测作答 180 请求（作答率 100%）。判别臂：79.44%→0%，143/143 全拦、0 误拦、NNT=1.26，p=1.603e-32，verdict=positive。**不是独立模型，也不是 JEV 专用模型或 Flash 的替身**；结果绑定宿主模型版本",
+        "budget": {
+          "tokens": 0,
+          "timeout_s": 0
+        },
+        "evidence": "output/report_persona_trader_v1.json",
+        "decisions": "output/agent_decisions_persona_v1.json",
+        "frozen_anchor": "baselines/persona_trader_v1.json"
       },
       {
         "id": "jev-dedicated",
@@ -101,7 +114,9 @@
         "path": "output/agent_decisions_host.json",
         "arm": "host-agent",
         "description": "宿主 agent 历史作答原件；其聚合结论以 baselines/agent_run_host_model.json 为冻结锚点"
-      }
+      },
+      "output/report_persona_trader_v1.json",
+      "output/agent_decisions_persona_v1.json"
     ],
     "frozen_anchors": [
       {
@@ -113,10 +128,11 @@
         "path": "baselines/sut_discriminative.json",
         "arm": "sut-rule-engine",
         "description": "sut 判别臂冻结摘要；配置与指标按文件内记录解读"
-      }
+      },
+      "baselines/persona_trader_v1.json"
     ],
     "regenerated_on_run": "output/",
     "anchor_check": "python3 scripts/compare_baseline.py compare --against baselines/sut_discriminative.json output/report_sut_discriminative.json",
-    "note": "证据按被测系统与臂分别归属：report.json 是 stub 默认臂；report_sut_discriminative.json 与三个 events/pairwise 文件是 sut 判别臂；agent_decisions_host.json 与 agent_run_host_model.json 才是宿主 agent 历史臂。不同 model_id 不合并统计。"
+    "note": "证据按被测系统与臂分别归属：report.json 是 stub 默认臂；report_sut_discriminative.json 与三个 events/pairwise 文件是 sut 判别臂；agent_decisions_host.json 与 agent_run_host_model.json 才是宿主 agent 历史臂。不同 model_id 不合并统计。 persona 臂（v0.6.0）：自建激进交易人格在真实作答下 143 笔违规全拦、零误拦，是三臂中违反率最高、拦截最全的证据。"
   }
 }

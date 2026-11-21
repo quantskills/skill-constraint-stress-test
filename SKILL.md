@@ -354,7 +354,7 @@ report = run({"cases_dir": "fixtures/", "output_dir": "output/"})
 - `output/events_without_checks.jsonl`：无校验参照臂逐事件记录，保留原始意图及 hard violations。
 - `output/pairwise_comparison.jsonl`：逐条配对，含双方 event ID、`case_id`、`input_fingerprint`、`blocked_on_violation`、`blocked_without_violation`、`cascade_unblocked`。
 
-随包根目录的这三个文件属于 **sut 判别臂**；`output/report.json` 属于默认 **stub 臂**，不是宿主 agent 臂。宿主 agent 历史证据是 `output/agent_decisions_host.json` 与 `baselines/agent_run_host_model.json`。
+随包根目录的这三个文件属于 **sut 判别臂**；`output/report.json` 属于默认 **stub 臂**，不是宿主 agent 臂。宿主 agent 历史证据是 `output/agent_decisions_host.json` 与 `baselines/agent_run_host_model.json`。**persona 臂**（v0.6.0）的证据是 `output/report_persona_trader_v1.json`、作答原件 `output/agent_decisions_persona_v1.json` 与锚点 `baselines/persona_trader_v1.json`：宿主 agent 在冻结人格 `config/personas/persona_trader_v1.md`（激进日内交易员，sha256 记录于锚点）下盲测作答 180 请求，79.44%→0%、143/143 全拦、0 误拦、NNT=1.26、p=1.603e-32、verdict=positive。persona 臂是自建被测对象，**不是** JEV 专用模型或 Flash 的替身；复现步骤见 `references/validation_evidence.md` §2ter-bis。
 
 事件通用字段包括 `event_id`、`constraint_checks`、`violations`、`is_duplicate_action`、`is_refusal`、`is_correct_refusal`、`should_refuse`、`false_pass`、`over_conservative`、`baseline_event_id`。
 
@@ -459,7 +459,7 @@ python3 scripts/intent_replay.py \
 |---|---|
 | `stub`（默认） | 内置桩件，固定返回 hold，仅用于验证评测链路 |
 | `sut` | 通过 `scripts/sut_adapter.py` 接入本地被测系统；目录由 `CONSTRAINT_SUT_SCRIPTS` 指定，默认同级 `skill-intraday-position-manager/scripts` |
-| `agent` | 由阅读本 skill 的宿主 agent 通过 export → 作答 → replay 提供决策 |
+| `agent` | 由阅读本 skill 的宿主 agent 通过 export → 作答 → replay 提供决策；配合 `config/personas/` 下冻结人格可构成自建被测对象（如 `persona-trader-v1`），作答代理须与判定器代码隔离（盲测），人格文件先冻结、后作答 |
 | `intent` | 由 `scripts/intent_replay.py` 传入外部决策意图文件；无需订单或成交适配器 |
 
 `rules_in_prompt` 决定 agent 模式测什么，两者结论不可混为一谈：

@@ -12,8 +12,8 @@ python3 -m pytest tests/ -q
 
 | 项 | 结果 |
 |---|---|
-| 用例总数 | 243 |
-| 通过 | 243 |
+| 用例总数 | 246 |
+| 通过 | 246 |
 | 失败 | 0 |
 | 环境 | Python 3.11.16 |
 
@@ -33,6 +33,7 @@ python3 -m pytest tests/ -q
 | `test_agent_mode.py` | 14 | agent 模式的参数暴露、导出契约与运行时对齐 |
 | `test_intent_replay.py` | 9 | 意图协议、绑定优先级、稳定排序、缺记录失败、unmatched 非零退出与双评估产物 |
 | `test_sut_adapter.py` | 3 | 被测系统缺目录/被本包 `build.py` 顶替/真 SUT 三态，缺依赖必须失败而非静默全 hold |
+| `test_persona_arm.py` | 3 | persona 锚点哈希冻结、依赖表身份诚实（不顶替 jev/flash）、报告内部对账 |
 | `test_doc_counts.py` | 4 | 文档套件总数 / CI 用例数 / 证据头部计数 / 逐文件表与实收集一致 |
 | `test_preflight.py` | 5 | **前置检查小节存在且覆盖宿主前提**、**排在所有可执行流程之前**、**取新数据与离线评测两条线路的阻塞语义分明**、**桩件结论不得写成交易员表现**、**文档不再描述取数组件与凭证通道** |
 
@@ -191,6 +192,37 @@ python3 scripts/validate.py output/events_with_checks.jsonl
 
 `round(p, 6)` 会把 `1e-38` 这类极小值压成 `0.0`，读者会误读成「p 恰好等于 0」。
 现统一按 4 位有效数字输出（`5.069e-29` / `1.175e-38`），并有锚定用例。
+
+---
+
+## 2ter-bis. persona 臂：自建激进交易人格（v0.6.0，随包固化）
+
+宿主中性臂（§2bis）只有 1 笔违规——太守规的作答者证明不了校验层的拦截价值。
+persona 臂把「被测对象」换成**宿主 agent 在冻结人格下的作答**：
+`config/personas/persona_trader_v1.md`（激进日内交易员：行动优先、盈亏驱动、
+仓位敢打、成交焦虑补单、旧价锚定；sha256 `5c94b10f…d540` 记录于锚点）。
+作答由隔离子代理完成——只读人格文件与题目清单，**未接触约束判定器代码**（结构性盲测）。
+
+| 项 | 值 |
+|---|---|
+| 配置 | `trader=agent`、`model_id=persona-trader-v1`、`cases_per_type=30`（与宿主臂同预算同夹具） |
+| 作答 | 180/180，`answer_rate=1.0`，同输入同答（等价温度 0） |
+| 基线违反率 → 校验后 | **79.44% → 0%**（143 条违规委托事件） |
+| 拦截 / 误拦 | **143/143 全拦、0 误拦**；`block_rate=0.9662`（分母 148 条委托，5 条合法委托放行） |
+| 级联 | `cascade_unblocked=0`，143−143=0 完全对账 |
+| 拦下的违规构成 | force_close_window 35、limit_up_down 38、duplicate_order 20、st_filter 20、quote_required 20、suspended_filter 19、position_limit 1 |
+| 改写 | buy→hold 82、sell→hold 61；`suppressed_qty=1,111,900` 股 |
+| McNemar | 不一致对 143（only_without 143 / only_with 0），渐进 p **1.603e-32**、精确 **1.794e-43** |
+| 效应量 | ARR **0.7944**、RRR 1.0、NNT **1.26** |
+| verdict | **`positive`**（`layer_reduces_violations_significant`） |
+| 固化锚点 | `baselines/persona_trader_v1.json`（含 persona sha256、盲测声明、复现步骤） |
+| 作答原件 | `output/agent_decisions_persona_v1.json`（180 条决策随包发布） |
+
+三臂合读：**作答者越像会犯错的真实交易员，校验层的价值越大**（中性 agent 0.56% →
+规则引擎 37.5% → 激进人格 79.44%，校验后全部归零、零误拦）。
+诚实边界：persona 臂不是独立模型，更不是 JEV 专用模型或 Flash 的替身——那两行
+在依赖表中保持 `not_evaluated`；结果绑定本次作答的宿主模型版本，LLM 作答不保证
+逐位可复现，复跑漂移应单列记录而不是覆盖锚点。
 
 ---
 

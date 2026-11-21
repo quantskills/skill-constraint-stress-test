@@ -121,6 +121,8 @@ python3 scripts/validate.py output/events_with_checks.jsonl --json
 |---|---|
 | `output/report.json` | 默认 stub 臂聚合报告（违反率、拦截率、误拦率、假放行率、ARR/RRR/NNT），不是宿主 agent 结果 |
 | `output/report_sut_discriminative.json` | sut 判别臂聚合报告；与下列三个逐事件文件同属一次运行 |
+| `output/report_persona_trader_v1.json` | persona 判别臂聚合报告（宿主 agent 在冻结激进交易人格下盲测作答，79.44%→0%、143/143 全拦、0 误拦、p=1.603e-32） |
+| `output/agent_decisions_persona_v1.json` | persona 臂 180 条作答原件（协议 `agent-decisions@1`，作答率 100%） |
 | `output/events_with_checks.jsonl` | sut 判别臂有校验层事件流，`was_blocked` 给出实际拦截 |
 | `output/events_without_checks.jsonl` | 同批 sut 事件的无校验参照臂，`hard_violations` 是误拦判据参照 |
 | `output/pairwise_comparison.jsonl` | 两臂逐事件配对，含双方 event ID、输入指纹、正确拦截/误拦/级联字段 |
@@ -429,7 +431,7 @@ python3 scripts/compare_baseline.py list
 ## 验收状态
 
 - `python3 scripts/build.py` 独立可运行 ✅
-- `python3 -m pytest tests/ -v` — **243 例全绿**（含 4 例文档对账守卫） ✅
+- `python3 -m pytest tests/ -v` — **246 例全绿**（含 4 例文档对账守卫） ✅
 - `env_check.py --self-check` 输出结构化 JSON，阻塞项非 0 退出 ✅
 - `validate.py` 对合法 JSONL 返回 0，对畸形文件返回非 0 ✅
 - 缺 PyYAML 时优雅降级到内置默认值 ✅
