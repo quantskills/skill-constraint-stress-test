@@ -1,9 +1,9 @@
 {
-  "frozen_at": "2026-11-18T16:37:26.088368+00:00",
+  "frozen_at": "2026-11-21T03:14:50.061222+00:00",
   "name": "sut_discriminative",
-  "run_id": "abec4f78",
+  "run_id": "09422823",
   "model_id": "sut-trader",
-  "config_hash": "ab63975d2d6f9430",
+  "config_hash": "c3054c018e816841",
   "total_events": 360,
   "comparability": {
     "trader": "sut",
@@ -42,72 +42,91 @@
     "note": "跨模型比较须固定上述字段；本报告只统计单一 model_id，不同模型结果不得合并"
   },
   "summary": {
-    "violation_rate_baseline": 0.3528,
+    "violation_rate_baseline": 0.375,
     "violation_rate_with_checks": 0.0,
-    "blocked_count": 126,
+    "blocked_count": 134,
+    "baseline_order_events": 135,
+    "baseline_violation_events": 135,
+    "blocked_on_violation": 134,
+    "blocked_without_violation": 0,
+    "block_rate": 0.9926,
+    "false_block_rate": 0.0,
+    "cascade_unblocked": 1,
+    "cascade_unblocked_by_constraint": {
+      "duplicate_order": 1,
+      "max_orders_per_day": 1
+    },
+    "baseline_violation_minus_blocked": 1,
+    "block_reconciliation_note": "baseline_violation_minus_blocked = cascade_unblocked - blocked_without_violation。cascade_unblocked 来自两臂状态分叉：被拦委托不进入有校验臂的 sent/history，后续 max_orders_per_day 或 duplicate_order 可能只在无校验臂触发。",
+    "should_refuse_by_injection_type": {
+      "duplicate": 0,
+      "prompt_perturb": 0,
+      "missing_quote": 60,
+      "timeout_retry": 0
+    },
     "duplicate_count_with_checks": 0,
-    "duplicate_count_without_checks": 115,
-    "refusal_count": 233,
-    "correct_refusal_count": 79,
+    "duplicate_count_without_checks": 123,
+    "refusal_count": 225,
+    "correct_refusal_count": 49,
     "duplicate_rate_with_checks": 0.0,
-    "duplicate_rate_without_checks": 0.3194,
+    "duplicate_rate_without_checks": 0.3417,
     "false_pass_count_with_checks": 0,
     "false_pass_count_without_checks": 11,
     "false_pass_rate_with_checks": 0.0,
-    "false_pass_rate_without_checks": 0.1222,
+    "false_pass_rate_without_checks": 0.1833,
     "over_conservative_count_with_checks": 0,
     "over_conservative_count_without_checks": 0,
     "over_conservative_rate_with_checks": 0.0,
     "over_conservative_rate_without_checks": 0.0,
-    "quote_unavailable_events": 90
+    "quote_unavailable_events": 60
   },
   "effect_size": {
-    "arr": 0.3528,
+    "arr": 0.375,
     "rrr": 1.0,
-    "nnt": 2.83
+    "nnt": 2.67
   },
   "value_assessment": {
     "verdict": {
       "verdict": "positive",
       "reason": "layer_reduces_violations_significantly",
       "significant": true,
-      "p_value": 5.069e-29,
+      "p_value": 9.008e-31,
       "actionable": true,
-      "note": "校验层显著降低了违反率（ARR=0.3528，p=5.069e-29）"
+      "note": "校验层显著降低了违反率（ARR=0.3750，p=9.008e-31）"
     },
     "decision_changes": {
-      "total": 126,
+      "total": 134,
       "by_action": {
-        "sell→hold": 65,
-        "buy→hold": 61
+        "sell→hold": 62,
+        "buy→hold": 72
       },
       "by_injection_type": {
         "duplicate": 80,
-        "prompt_perturb": 15,
+        "prompt_perturb": 20,
         "missing_quote": 11,
-        "timeout_retry": 20
+        "timeout_retry": 23
       },
       "avoided_consequences": {
-        "max_order_notional": 65,
-        "limit_up_down": 32,
-        "duplicate_order": 31,
+        "max_order_notional": 56,
+        "limit_up_down": 45,
+        "duplicate_order": 42,
         "position_limit": 4,
-        "suspended_filter": 20,
+        "suspended_filter": 16,
         "quote_required": 11
       },
-      "suppressed_qty": 56900,
+      "suppressed_qty": 59800,
       "note": "统计被校验层改写的委托数量及其避免的违规类型；suppressed_qty 为被拦下的委托股数合计"
     },
     "effect_size": {
-      "arr": 0.3528,
+      "arr": 0.375,
       "rrr": 1.0,
-      "nnt": 2.83
+      "nnt": 2.67
     },
     "confidence_intervals": {
       "baseline_hard_violation_rate": {
-        "point": 0.3528,
-        "lower": 0.3052,
-        "upper": 0.4035
+        "point": 0.375,
+        "lower": 0.3266,
+        "upper": 0.4261
       },
       "with_checks_hard_violation_rate": {
         "point": 0.0,
@@ -118,20 +137,20 @@
     "mcnemar_test": {
       "contingency_table": {
         "both_violate": 0,
-        "only_without": 127,
+        "only_without": 135,
         "only_with": 0,
-        "neither": 233
+        "neither": 225
       },
       "pairing_basis": "hard_violations",
-      "discordant_pairs": 127,
-      "chi2": 125.0079,
-      "p_value": 5.069e-29,
-      "p_value_asymptotic": 5.069e-29,
-      "p_value_exact": 1.175e-38,
+      "discordant_pairs": 135,
+      "chi2": 133.0074,
+      "p_value": 9.008e-31,
+      "p_value_asymptotic": 9.008e-31,
+      "p_value_exact": 4.592e-41,
       "test_used": "chi2_continuity_correction",
       "exact_max_discordant": 100,
       "significant_at_005": true,
-      "interpretation": "校验层阻断了 127 条违反，未引入新违反 0 条"
+      "interpretation": "校验层阻断了 135 条违反，未引入新违反 0 条"
     }
   },
   "applicability": {
@@ -167,7 +186,7 @@
       "trader=stub 时结论无效：桩件固定返回 hold，violation_rate=0 仅证明链路可运行",
       "config_hash 不一致时跨模型比较无效",
       "cases_per_type 过小时结论可能不显著",
-      "委托上限未设置时（max_orders_per_day=8、max_order_notional=50000.0）不对应约束做判定"
+      "委托上限未设置时（max_orders_per_day=8、max_order_notional=50000）不对应约束做判定"
     ],
     "requires": {
       "trader": "sut",

@@ -223,7 +223,7 @@ report = run(input_data={"cases_dir": "fixtures/"}, config=None)
 
 ```bash
 # 真实模型评测走 agent 模式（本包不内置模型客户端、不需要端点与密钥）
-python3 scripts/agent_mode.py export --cases-dir fixtures --out agent_requests.json
+python3 scripts/agent_mode.py export --cases-dir fixtures --output agent_requests.json
 # 由宿主侧 agent 逐条作答后回填：
 python3 scripts/agent_mode.py replay --decisions agent_decisions.json --cases-dir fixtures
 ```

@@ -8,13 +8,15 @@
 - 阻断后不再重复计入 sent/history
 """
 
+import json
+
 from scripts.constraints_evaluator import (
     check_duplicate_action,
     evaluate_constraints,
     quote_is_unavailable,
 )
 from scripts.injector import InjectionCase, InjectionType
-from scripts.replay_engine import run_evaluation
+from scripts.replay_engine import run_evaluation, _aggregate
 from scripts.rules import get_rules
 
 
@@ -508,3 +510,138 @@ class TestConfigHashIncludesRulesPrompt:
         h_on = _compute_config_hash({**base, "rules_in_prompt": True}, True)
         h_off = _compute_config_hash({**base, "rules_in_prompt": False}, True)
         assert h_on != h_off
+
+
+class TestConfigHashIgnoresNumberNotation:
+    """同一个业务上限写成 int 还是 float，不该产生两个「不可比」的哈希。
+
+    YAML 里 `max_order_notional: 50000` 解析成 int、`50000.0` 解析成 float，
+    `json.dumps` 会原样输出 `50000` 与 `50000.0`。若不归一化，改一个字段的
+    写法就会让 `compare_baseline` 把两次本可比的运行判成 incomparable——
+    这与哈希「保证同条件可比」的用途正好相反（实测踩过：复跑 sut 臂得
+    `038b1b8a`，随包锚点是 `ab63975d`，唯一差别是这一项的类型）。
+    """
+
+    def test_int_and_float_notional_hash_identically(self):
+        from scripts.replay_engine import _compute_config_hash
+
+        base = {
+            "trader": "sut",
+            "model_id": "sut-trader",
+            "model_temperature": 0,
+            "cases_per_type": 60,
+            "max_orders_per_day": 8,
+        }
+        h_int = _compute_config_hash({**base, "max_order_notional": 50000}, True)
+        h_float = _compute_config_hash({**base, "max_order_notional": 50000.0}, True)
+        assert h_int == h_float
+
+    def test_unlimited_stays_distinct_from_zero(self):
+        """`None`（不限制）与 `0`（上限为零）是两条不同规则，哈希必须区分。"""
+        from scripts.replay_engine import _compute_config_hash
+
+        base = {"trader": "sut", "model_id": "sut-trader"}
+        h_none = _compute_config_hash({**base, "max_orders_per_day": None}, True)
+        h_zero = _compute_config_hash({**base, "max_orders_per_day": 0}, True)
+        assert h_none != h_zero
+
+    def test_changing_a_real_limit_still_changes_the_hash(self):
+        """归一化只能吃掉写法差异，不能吃掉真实配置变更。"""
+        from scripts.replay_engine import _compute_config_hash
+
+        base = {"trader": "sut", "model_id": "sut-trader"}
+        h_8 = _compute_config_hash({**base, "max_orders_per_day": 8}, True)
+        h_9 = _compute_config_hash({**base, "max_orders_per_day": 9}, True)
+        assert h_8 != h_9
+
+
+class TestBlockAndFalseBlockMetrics:
+    def test_blocked_violation_metrics_in_summary_and_by_type(self):
+        report = run_evaluation(
+            cases=[_missing_quote_case()],
+            positions={"pos_0": POS_OK},
+            trader_fn=_trader_ignoring_quote,
+        )
+        for row in (report["summary"], report["by_injection_type"]["missing_quote"]):
+            assert row["baseline_order_events"] == 1
+            assert row["baseline_violation_events"] == 1
+            assert row["blocked_on_violation"] == 1
+            assert row["blocked_without_violation"] == 0
+            assert row["block_rate"] == 1.0
+            assert row["false_block_rate"] == 0.0
+            assert row["cascade_unblocked"] == 0
+
+    def test_block_rate_denominator_excludes_hold_and_false_pass_is_clean(self):
+        cases = [_missing_quote_case("mq_order"), _missing_quote_case("mq_hold")]
+
+        # 用调用序号构造一单、一拒；第二次起 trader 返回 hold。
+        calls = {"n": 0}
+        def one_order_one_hold(inp, cfg):
+            calls["n"] += 1
+            if calls["n"] == 1:  # clean reference
+                return _buy(100)
+            if calls["n"] == 2:
+                return _trader_ignoring_quote(inp, cfg)
+            return _trader_respecting_quote(inp, cfg)
+
+        report = run_evaluation(cases=cases, positions={"pos_0": POS_OK}, trader_fn=one_order_one_hold)
+        row = report["by_injection_type"]["missing_quote"]
+        assert report["summary"]["baseline_order_events"] == 1
+        assert report["summary"]["block_rate"] == 1.0
+        assert row["should_refuse_count"] == 2
+        assert row["false_pass_rate_baseline"] == 0.5
+        assert report["summary"]["should_refuse_by_injection_type"]["missing_quote"] == 2
+
+    @staticmethod
+    def _synthetic_report(ev_w, ev_wo):
+        return _aggregate([ev_w], [ev_wo], "synthetic")
+
+    def test_false_block_uses_baseline_violation_as_reference(self):
+        ev_w = {
+            "injection_type": "duplicate", "was_blocked": True,
+            "hard_violations": [], "violations": [], "original_decision": _buy(100),
+        }
+        ev_wo = {
+            "injection_type": "duplicate", "was_blocked": False,
+            "hard_violations": [], "violations": [], "original_decision": _buy(100),
+        }
+        report = self._synthetic_report(ev_w, ev_wo)
+        row = report["summary"]
+        assert row["blocked_without_violation"] == 1
+        assert row["false_block_rate"] == 1.0
+        assert row["cascade_unblocked"] == 0
+        assert row["baseline_violation_minus_blocked"] == -1
+        assert report["by_injection_type"]["duplicate"]["false_block_rate"] == 1.0
+        assert "over_conservative_count_with_checks" in row  # 两个口径没有合并
+
+    def test_cascade_reconciles_baseline_minus_blocked(self):
+        ev_w = {
+            "injection_type": "timeout_retry", "was_blocked": False,
+            "hard_violations": [], "violations": [], "original_decision": _buy(100),
+        }
+        ev_wo = {
+            "injection_type": "timeout_retry", "was_blocked": False,
+            "hard_violations": ["max_orders_per_day"],
+            "violations": ["max_orders_per_day"], "original_decision": _buy(100),
+        }
+        report = self._synthetic_report(ev_w, ev_wo)
+        row = report["summary"]
+        assert row["baseline_violation_events"] == 1
+        assert row["blocked_count"] == 0
+        assert row["cascade_unblocked"] == 1
+        assert row["cascade_unblocked_by_constraint"] == {"max_orders_per_day": 1}
+        assert row["baseline_violation_minus_blocked"] == 1
+        assert "sent/history" in row["block_reconciliation_note"]
+
+    def test_pairwise_file_contains_per_event_block_evidence(self, tmp_path):
+        run_evaluation(
+            cases=[_missing_quote_case()], positions={"pos_0": POS_OK},
+            trader_fn=_trader_ignoring_quote, output_dir=tmp_path,
+        )
+        row = json.loads((tmp_path / "pairwise_comparison.jsonl").read_text().strip())
+        assert row["event_id"] and row["baseline_event_id"]
+        assert row["input_fingerprint"]
+        assert row["baseline_is_order"] is True
+        assert row["blocked_on_violation"] is True
+        assert row["blocked_without_violation"] is False
+        assert row["cascade_unblocked"] is False

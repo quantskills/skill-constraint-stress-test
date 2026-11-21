@@ -14,7 +14,6 @@ _DEFAULTS: dict[str, Any] = {
     "max_position_pct": 0.3,
     "cases_per_type": 30,
     "model_temperature": 0,
-    "enable_constraint_checks": True,
     "output_dir": "output",
     # 委托上限（None = 不限制；由使用方按业务填写）
     "max_orders_per_day": None,

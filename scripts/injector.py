@@ -239,8 +239,44 @@ def bind_machine_refs(
     bound_keys = sorted(positions)
     if not bound_keys:
         return cases
-    return [
-        replace(case, position_ref=bound_keys[idx % len(bound_keys)])
-        if _MACHINE_REF.match(case.position_ref or "") else case
-        for idx, case in enumerate(cases)
+
+    # 缺行情夹具只能由 missing_quote 注入消费。旧实现按全局序号无差别轮转，
+    # refusal_55..64 会落进 prompt_perturb，使「提示扰动」被误标成 should_refuse，
+    # false_pass_rate 的分母因此混入另一类故障。显式 position_ref 不改写：调用方
+    # 若有意构造「提示扰动 + 缺行情」的复合场景，仍应尊重其输入。
+    quote_ok = [
+        key for key in bound_keys
+        if positions[key].get("price") not in (None, 0)
     ]
+    if not quote_ok:
+        # 数据池全部缺行情时没有可伪装成正常行情的路径，退回原轮转并如实分类。
+        quote_ok = bound_keys
+    quote_bad = [key for key in bound_keys if key not in quote_ok]
+
+    bound = list(cases)
+    used_quote_ok: set[str] = set()
+    cursor = 0
+    for idx, case in enumerate(bound):
+        if not _MACHINE_REF.match(case.position_ref or ""):
+            continue
+        if case.injection_type == InjectionType.MISSING_QUOTE:
+            continue
+        key = quote_ok[cursor % len(quote_ok)]
+        cursor += 1
+        bound[idx] = replace(case, position_ref=key)
+        used_quote_ok.add(key)
+
+    # 缺行情案例先消费 quote_bad，再补前面没覆盖的正常夹具，尽量保持全池覆盖。
+    remaining = [key for key in quote_ok if key not in used_quote_ok]
+    missing_pool = quote_bad + remaining + quote_ok
+    cursor = 0
+    for idx, case in enumerate(bound):
+        if (
+            case.injection_type == InjectionType.MISSING_QUOTE
+            and _MACHINE_REF.match(case.position_ref or "")
+        ):
+            bound[idx] = replace(
+                case, position_ref=missing_pool[cursor % len(missing_pool)]
+            )
+            cursor += 1
+    return bound

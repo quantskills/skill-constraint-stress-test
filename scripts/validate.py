@@ -30,6 +30,10 @@ OPTIONAL_BOOL_FIELDS = [
     "over_conservative",
     "is_correct_refusal",
     "decision_changed",
+    "baseline_is_order",
+    "blocked_on_violation",
+    "blocked_without_violation",
+    "cascade_unblocked",
 ]
 
 VALID_INJECTION_TYPES = {

@@ -55,6 +55,7 @@ def run(
     output_dir: str | None = None,
     market_id: str | None = None,
     injection_types: list[str] | None = None,
+    intent_path: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """执行约束压力测试评测。
@@ -99,10 +100,24 @@ def run(
     cases_per_type = config.get("cases_per_type", 30)
 
     # 选择被测系统（必须先于案例生成：agent 模式需用它记录的导出参数对齐案例集）
-    trader_name = config.get("trader", "stub")
+    trader_name = "intent" if intent_path else config.get("trader", "stub")
+    if intent_path:
+        config["trader"] = "intent"
     trader_fn = None
     if trader_name == "sut":
-        from scripts.sut_adapter import sut_trader
+        # 先解析并校验被测系统，再进回测：缺依赖必须在产出任何报告之前失败。
+        # 否则 sut_trader 会把每条决策吞成 hold，报告看起来「零违规」，
+        # 实际上被测系统一次都没跑（最坏的假象）。
+        from scripts.sut_adapter import SutUnavailable, resolve_sut, sut_trader
+
+        try:
+            resolve_sut()
+        except SutUnavailable as exc:
+            raise InputValidationError(
+                "sut_unavailable",
+                exc.message,
+                hint=exc.hint or "trader=sut 需要可导入的被测系统",
+            ) from exc
         trader_fn = sut_trader
     elif trader_name == "llm":
         raise InputValidationError(
@@ -136,13 +151,20 @@ def run(
             config["cases_per_type"] = cases_per_type
         if params.get("injection_types") and not injection_types:
             injection_types = list(params["injection_types"])
+    elif trader_name == "intent":
+        if not intent_path:
+            raise InputValidationError(
+                "intents_not_found", "trader=intent 需要 intent_path"
+            )
+        # 外部清单没有干净输入参考记录；禁止补调，否则会被当成额外未匹配记录。
+        config["clean_reference_enabled"] = False
     elif trader_name != "stub":
         raise InputValidationError(
             "unknown_trader",
             f"未知被测系统：{trader_name}",
             hint=(
                 "可选值：stub（内置桩件）/ sut（本地被测系统）/ "
-                "llm（真实大模型）/ agent（由阅读 skill 的 AI 自行决策）"
+                "agent（由阅读 skill 的 AI 自行决策）/ intent（外部决策意图回放）"
             ),
         )
 
@@ -223,6 +245,19 @@ def run(
     # 引擎，而且「哪几个夹具参与」取决于文件名首字母，与案例想考的约束毫无关系。
     # 只覆盖机器分配的 ref（^position_\d{4}$），调用方显式绑定的原样保留。
     all_cases = bind_machine_refs(all_cases, positions)
+
+    # 决策意图接入只筛选记录显式绑定的案例；trader_fn 仍由同一个引擎调用，
+    # 有/无校验两臂共用每条原始意图。未知/溢出记录保留在 stats.unmatched。
+    if trader_name == "intent":
+        from scripts.intent_replay import IntentReplayError, intents_trader
+
+        try:
+            trader_fn, all_cases, intent_stats = intents_trader(
+                intent_path or "", all_cases
+            )
+        except IntentReplayError as e:
+            raise InputValidationError(e.code, e.message, e.hint) from e
+
     # 「实际绑定到多少个夹具」必须报出来：fixture_count 只是载入总数，两者不等时
     # 覆盖类说法只对已绑定的部分成立。
     config["fixtures_bound"] = len({c.position_ref for c in all_cases})
@@ -284,6 +319,35 @@ def run(
                     f"作答率仅 {answered}/{total_req}，未作答部分按 hold 处理，"
                     "违反率会被系统性低估；请补全决策后重跑。"
                 ),
+            }
+        if output_dir:
+            with open(Path(output_dir) / "report.json", "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+    if trader_name == "intent":
+        if intent_stats["consumed_records"] != intent_stats["matched_records"]:
+            raise InputValidationError(
+                "intent_consumption_mismatch",
+                "引擎消费的意图数与绑定数不一致",
+                hint="检查 clean_reference_enabled 与案例遍历是否被修改",
+            )
+        report["intent_replay"] = {
+            **intent_stats,
+            "ok": intent_stats["unmatched_count"] == 0,
+            "note": "unmatched 非空时接入 CLI 退出码为 2；匹配部分的两臂报告仍落盘供核验",
+        }
+        report["value_assessment"]["trader_meta"] = {
+            "kind": "intent_replay",
+            "model_id": config.get("model_id", "intent-trader"),
+            "source": str(intent_path),
+        }
+        if intent_stats["unmatched_count"]:
+            report["value_assessment"]["verdict"] = {
+                "verdict": "inconclusive",
+                "reason": "unmatched_intent_records",
+                "significant": False,
+                "p_value": report.get("mcnemar_test", {}).get("p_value", 1.0),
+                "actionable": False,
+                "note": "存在未绑定记录，本次报告只用于定位接入问题，不作为完整评测结论",
             }
         if output_dir:
             with open(Path(output_dir) / "report.json", "w", encoding="utf-8") as f:

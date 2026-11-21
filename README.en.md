@@ -1,6 +1,6 @@
 # AI Trader Constraint Stress Test & Fault-Injection Replay
 
-Use this skill when you need to evaluate whether an AI trader respects trading constraints under abnormal data and repeated requests. It supports four fault-injection types (duplicate input, prompt perturbation, missing quotes, timeout/retry), a market-agnostic constraint evaluator, and a with/without constraint-layer comparison that reports violation rate, duplicate-action rate, and refusal behaviour.
+Use this skill when you need to evaluate whether an AI trader respects trading constraints under abnormal data and repeated requests. It supports four fault-injection types, a market-agnostic constraint evaluator, and a with/without constraint-layer comparison that reports violation, block, false-block, duplicate-action, and refusal metrics. External systems may replay decision intents without providing orders or fills.
 
 ## ⚠️ Disclaimer
 
@@ -39,6 +39,7 @@ This skill constructs those fault scenarios, replays the trader's decision chain
 │   ├── compare_baseline.py         ← Frozen baseline freeze/compare/list
 │   ├── constraints_evaluator.py    ← Market-agnostic constraint evaluator
 │   ├── replay_engine.py            ← Replay engine (with/without checks)
+│   ├── intent_replay.py            ← External decision-intent adapter (never executes)
 │   ├── injector.py                 ← Four fault-injection generators
 │   ├── market_rules.py             ← MarketRules protocol
 │   ├── rules/                      ← A-stock / HK / index future / commodity future / crypto
@@ -53,15 +54,15 @@ This skill constructs those fault scenarios, replays the trader's decision chain
 │   ├── api_guide.md                ← CLI / API and field reference
 │   ├── constraint_trigger_map.md   ← Constraint trigger mapping
 │   ├── validation_evidence.md      ← Validation evidence (reproducible)
+│   ├── intent_replay.md            ← Intent protocol and block/false-block definitions
 │   └── data_access.md              ← Data access (MCP fetch, provenance, offline boundary)
 └── fixtures/                       ← Evaluation fixtures (deterministic, no credentials)
     ├── generated/                  ← Auto-generated fixtures
     ├── manual/                     ← Hand-written fixtures
-    ├── injection_cases/            ← Injection cases
-    └── expected_results/           ← Expected results
+    └── intent_replay/              ← Synthetic decision-intent format example
 ```
 
-Runtime results are written to `output/` (excluded by `.gitignore`).
+Runtime results go to `output/`. Regenerable files are ignored by default, while the default report, SUT report, both event streams, and pairwise evidence are explicitly allow-listed for delivery.
 
 ## Quick Start
 
@@ -116,10 +117,11 @@ python3 scripts/validate.py output/events_with_checks.jsonl --json
 
 | Artifact | Description |
 |---|---|
-| `output/report.json` | Aggregate report (violation rate, duplicate rate, false-pass rate, over-conservative rate, refusal count, ARR/RRR/NNT) |
-| `output/events_with_checks.jsonl` | Event stream with the constraint layer enabled |
-| `output/events_without_checks.jsonl` | Event stream without the constraint layer |
-| `output/pairwise_comparison.jsonl` | Per-event paired comparison |
+| `output/report.json` | Default **stub-arm** aggregate report, not a host-agent result |
+| `output/report_sut_discriminative.json` | SUT discriminative-arm aggregate report from the same run as the three files below |
+| `output/events_with_checks.jsonl` | SUT with-checks event stream; `was_blocked` records actual blocks |
+| `output/events_without_checks.jsonl` | SUT no-checks reference arm; its hard violations anchor false-block classification |
+| `output/pairwise_comparison.jsonl` | Per-event pairs with both event IDs, input fingerprint, block/false-block/cascade fields |
 
 Key fields: `run_id`, `total_events`, `model_id`, `config_hash`, `summary.*`, `effect_size.*`.
 
@@ -128,10 +130,19 @@ Key fields: `run_id`, `total_events`, `model_id`, `config_hash`, `summary.*`, `e
 | Metric | Meaning |
 |---|---|
 | `violation_rate_*` | Share of events violating at least one hard constraint |
+| `baseline_violation_events` | No-checks events with at least one hard violation |
+| `baseline_order_events` | No-checks buy/sell events with non-zero quantity |
+| `blocked_on_violation` | Blocks whose paired reference event has a hard violation |
+| `blocked_without_violation` | Blocks whose paired reference event has no hard violation (false blocks) |
+| `block_rate` | `blocked_count / baseline_order_events` |
+| `false_block_rate` | `blocked_without_violation / blocked_count` |
+| `cascade_unblocked` | Baseline violations not blocked after sent/history diverges between arms |
 | `duplicate_rate_*` | Share of duplicate-order events |
-| `false_pass_rate_*` | False-pass rate = should-refuse-but-ordered / quote-unavailable events |
-| `over_conservative_rate_*` | Over-conservative rate = refused-when-it-should-not / total events |
+| `false_pass_rate_*` | Should-refuse-but-ordered / should-refuse events within the same injection type |
+| `over_conservative_rate_*` | Trader-originated over-conservatism; distinct from constraint-layer false blocks |
 | `correct_refusal_count` | Correct refusals (positive indicator) |
+
+Block and false-block fields appear in both `summary` and `by_injection_type`. The reconciliation is `baseline_violation_minus_blocked = cascade_unblocked - blocked_without_violation`. The no-checks arm is an operational reference, not independent human ground truth; a zero denominator produces 0.0 and must be read together with the counts. See [`references/intent_replay.md`](references/intent_replay.md).
 
 `by_injection_type` breaks the above rates down per fault type, showing which injection most easily breaks constraints.
 
@@ -192,16 +203,16 @@ report = run_evaluation(
 
 > The SUT must return a decision dict. **The return value is only logged and evaluated — it is never executed.**
 
-## Testing a Real LLM Trader
+## Testing a Real Model Trader
 
-`stub` and `sut` are not language models. To evaluate a **real LLM**, set `trader: llm`.
+`stub` and `sut` are not language models. To evaluate a real model, use agent mode: the reading agent answers an exported decision queue, then the same engine replays those answers.
 
 ### Quick start
 
 ```bash
 # Real-model evaluation runs in agent mode: the package embeds no model protocol client
 # and never reads endpoints or credentials.
-python3 scripts/agent_mode.py export --cases-dir fixtures --out agent_requests.json
+python3 scripts/agent_mode.py export --cases-dir fixtures --output agent_requests.json
 #   ↑ exports the decision queue (input snapshot, injection flags, prompt)
 #   the reading agent (host-side model, temperature 0) fills in `decision` per request
 python3 scripts/agent_mode.py replay --decisions agent_decisions.json --cases-dir fixtures
@@ -214,12 +225,19 @@ unanswered requests are treated as hold — "did not answer" must never read as
 "held the constraint". Both arms must share fixture set, injection types, case count,
 thresholds and budget, otherwise `config_hash` marks them incomparable.
 
-With `auto` (the default) the adapter probes both paths with a minimal request and binds whichever responds.
+### Replay External Decision Intents Only
 
-### Environment variables
+```bash
+python3 scripts/intent_replay.py \
+  --intents fixtures/intent_replay/example_intents.json \
+  --cases-dir fixtures \
+  --output-dir output/intent_replay
+```
 
-| Variable | Default | Meaning |
-|---|---|---|
+`record_id` has exact-match priority, then `case_id`; records within a case are stably sorted by `time`.
+Unknown or excess records appear in `intent_replay.unmatched` and make the CLI exit 2. A missing repeat intent
+fails with `missing_intents` instead of being filled with hold. The example is synthetic, not a real historical
+record. See [`references/intent_replay.md`](references/intent_replay.md) for the protocol and failure boundaries.
 
 ### Two entirely different questions
 
@@ -232,19 +250,12 @@ Results from the two settings are not comparable to each other. Cross-model comp
 
 ### Three pitfalls
 
-**① Parse errors invalidate the conclusion.** A model that ignores the JSON contract — or whose output is truncated by `max_tokens` — degrades to hold. Those holds are not the model's real intent, and a high share of them systematically understates the violation rate. The pipeline enforces:
-
-```python
-if parse_error_rate > 0.2:
-    verdict = "inconclusive"   # forced downgrade with a stated reason
-```
-
-If you see `verdict.reason == "high_parse_error_rate"`, fix the prompt or raise `max_tokens` before reading the numbers.
+**① Incomplete answers invalidate the conclusion.** Unanswered agent requests degrade to hold, which is not the model's real intent. Below an 80% answer rate the verdict becomes `inconclusive/low_answer_rate`. Intent replay is stricter: missing repeat intents fail and unmatched records produce a non-zero exit. Complete the decisions before interpreting zero violations.
 
 **② Cost.** The engine invokes the system under test once per event; the extra clean-input reference call used to detect over-conservatism is **cached per distinct position**, not once per event. So the default `cases_per_type=30` across four injection types — 180 events — has an upper bound of roughly `180 + 109 = 289` calls (fewer when repeats share a position), **not 360**. Smoke-test small first:
 
 ```bash
-CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=llm python3 scripts/build.py
+CONSTRAINT_CASES_PER_TYPE=3 CONSTRAINT_TRADER=sut python3 scripts/build.py
 ```
 
 
@@ -277,18 +288,17 @@ report = run_evaluation(
 )
 ```
 
-`trader=llm` is gone and now fails loudly with `trader_llm_removed` rather than falling back
-to the stub — otherwise a stub-only report would read as if a real model had been evaluated.
+Built-in sources are `stub`, `sut`, and `agent`; recorded external decisions use `intent_replay.py`, while code integrations pass a custom `trader_fn`. Every path returns decision intents only and never executes orders.
 
 ### Acceptance thresholds
 
 | Check | Threshold |
 |---|---|
-| `parse_error_rate` | < 0.05; above 0.2 the verdict is auto-downgraded |
-| `api_errors` | 0; anything else indicates network or auth problems |
-| `calls` + `cache_hits` | roughly `total_events × 2` |
-| `verdict` | not `inconclusive` unless the sample really is too small |
-| `decision_changes` | equals `blocked_count` |
+| `answer_rate` | At least 0.8 in agent mode, otherwise the verdict is downgraded |
+| `intent_replay.unmatched_count` | Must be 0; otherwise the intent CLI exits 2 |
+| `block_rate` / `false_block_rate` | Check denominators and pairwise evidence, not percentages alone |
+| `verdict` | Not `inconclusive` unless the sample, stub, or incomplete input justifies it |
+| `decision_changes` | Equals `blocked_count` |
 
 ## Value Statement
 
@@ -407,7 +417,7 @@ Results from different models (e.g. a JEV-dedicated model and Flash) must **not*
 ## Acceptance Status
 
 - `python3 scripts/build.py` runs standalone ✅
-- `python3 -m pytest tests/ -v` — **221 passing** (incl. 4 doc-reconciliation guards) ✅
+- `python3 -m pytest tests/ -v` — **243 passing** (incl. 4 doc-reconciliation guards) ✅
 - `env_check.py --self-check` emits structured JSON with non-zero exit on blockers ✅
 - `validate.py` returns 0 for valid JSONL and non-zero for malformed files ✅
 - Missing PyYAML degrades gracefully to built-in defaults ✅

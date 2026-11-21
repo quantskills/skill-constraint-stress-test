@@ -40,4 +40,7 @@ mcp_exports/
 output/*
 !output/report.json
 !output/report_sut_discriminative.json
+!output/events_with_checks.jsonl
+!output/events_without_checks.jsonl
+!output/pairwise_comparison.jsonl
 !output/agent_decisions_host.json

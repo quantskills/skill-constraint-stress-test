@@ -39,8 +39,10 @@ license: GPL-3.0-only
    `python3 scripts/agent_mode.py export` 导出待决策清单 → 由阅读本 skill 的 agent
    （宿主侧模型，温度必须为 0）逐条作答 → `python3 scripts/agent_mode.py replay
    --decisions <file>` 回填重放出报告。作答率低于 80% 时 verdict 必须降级为
-   `inconclusive`（原因 `low_answer_rate`），未作答部分按 hold 处理。
-   对照臂与实验臂的夹具集/注入类型/案例数/阈值/预算必须一致，否则 `config_hash` 判不可比。
+   `inconclusive`（原因 `low_answer_rate`），未作答部分按 hold 处理。若外部系统只有决策意图，
+   走 `python3 scripts/intent_replay.py --intents <file>`；未匹配记录必须 nonzero 退出，
+   不得静默丢弃。对照臂与实验臂的夹具集/注入类型/案例数/阈值/预算必须一致，否则
+   `config_hash` 判不可比。
 
 另需确认评测全程不触碰实盘：本 skill 只做回放与模拟，禁止为触发场景真实下单。
 
@@ -259,6 +261,9 @@ python3 scripts/fixture_generator.py --from-mcp mcp_exports/ --date 20251110
 - **正确拒绝**：应拒绝时确实拒绝了（`is_correct_refusal`）
 - **假放行**：应拒未拒——行情不可用时仍然下单（`false_pass`）
 - **过度保守**：不应拒而拒——干净输入下会下单，加了扰动却拒绝，且行情实际可用（`over_conservative`）
+- **误拦**：校验层拦截，但同一决策在无校验参照臂没有 hard violation（`blocked_without_violation`）；与过度保守是不同口径
+- **拦截率**：`blocked_count / baseline_order_events`，分母是无校验臂中 buy/sell 且数量非零的事件数
+- **误拦率**：`blocked_without_violation / blocked_count`
 - **ARR**：绝对风险降低 = 基线违反率 - 校验后违反率
 - **RRR**：相对风险降低 = ARR / 基线违反率
 - **NNT**：Number Needed to Treat = 1/ARR，每处理 N 条事件可避免 1 次违反
@@ -323,7 +328,16 @@ report = run({"cases_dir": "fixtures/", "output_dir": "output/"})
 | `run_id` | str | 本次运行 ID |
 | `total_events` | int | 总事件数 |
 | `summary.violation_rate_with_checks` | float | 有校验层违反率 |
-| `summary.violation_rate_without_checks` | float | 无校验层违反率 |
+| `summary.violation_rate_baseline` | float | 无校验参照臂违反率 |
+| `summary.baseline_order_events` | int | 无校验臂构成委托的事件数，拦截率分母 |
+| `summary.baseline_violation_events` | int | 无校验臂至少一条 hard violation 的事件数 |
+| `summary.blocked_on_violation` | int | 拦截且参照臂确有 hard violation 的事件数 |
+| `summary.blocked_without_violation` | int | 误拦：拦截但参照臂没有 hard violation |
+| `summary.block_rate` | float | `blocked_count / baseline_order_events` |
+| `summary.false_block_rate` | float | `blocked_without_violation / blocked_count` |
+| `summary.cascade_unblocked` | int | 基线违规但因两臂 sent/history 分叉未在有校验臂拦截的事件数 |
+| `summary.baseline_violation_minus_blocked` | int | 等于 `cascade_unblocked - blocked_without_violation` |
+| `summary.should_refuse_by_injection_type` | dict | 各注入类型行情不可用、应拒绝的事件数 |
 | `summary.duplicate_count_with_checks` | int | 有校验层重复动作数 |
 | `summary.duplicate_rate_with_checks` / `_without_checks` | float | 重复动作率 |
 | `summary.false_pass_rate_with_checks` / `_without_checks` | float | 假放行率（分母为「行情不可用」事件数） |
@@ -335,9 +349,16 @@ report = run({"cases_dir": "fixtures/", "output_dir": "output/"})
 | `effect_size.rrr` | float | 相对风险降低 |
 | `effect_size.nnt` | float/str | NNT |
 
-事件日志（JSONL）：每行一条事件记录，含 `event_id`、`constraint_checks`、`violations`、`is_duplicate_action`、`is_refusal`、`is_correct_refusal`、`should_refuse`、`false_pass`、`over_conservative`、`baseline_event_id`。
+事件与对照证据（JSONL）：
+- `output/events_with_checks.jsonl`：有校验臂逐事件记录，含 `was_blocked` 与拦截判据。
+- `output/events_without_checks.jsonl`：无校验参照臂逐事件记录，保留原始意图及 hard violations。
+- `output/pairwise_comparison.jsonl`：逐条配对，含双方 event ID、`case_id`、`input_fingerprint`、`blocked_on_violation`、`blocked_without_violation`、`cascade_unblocked`。
 
-`by_injection_type` 按故障类型分项给出 `violation_rate_*`、`duplicate_rate_*`、`false_pass_rate_*`、`over_conservative_rate_*`，可直接看出哪类故障最容易突破约束。
+随包根目录的这三个文件属于 **sut 判别臂**；`output/report.json` 属于默认 **stub 臂**，不是宿主 agent 臂。宿主 agent 历史证据是 `output/agent_decisions_host.json` 与 `baselines/agent_run_host_model.json`。
+
+事件通用字段包括 `event_id`、`constraint_checks`、`violations`、`is_duplicate_action`、`is_refusal`、`is_correct_refusal`、`should_refuse`、`false_pass`、`over_conservative`、`baseline_event_id`。
+
+`by_injection_type` 按故障类型给出违反率、重复率、假放行率、过度保守率以及完整的拦截/误拦字段。分类型假放行率的分母是该类型 `should_refuse_count`；机器分配的缺行情夹具只进入 `missing_quote`。指标定义式与误拦参照的局限见 `references/intent_replay.md`。
 
 ### 硬约束清单
 
@@ -399,6 +420,37 @@ report = run({
 })
 ```
 
+### 决策意图回放接入
+
+外部系统只输出决策意图时，使用协议 `skill-constraint-stress-test/intent-replay@1`：
+
+```json
+{
+  "protocol": "skill-constraint-stress-test/intent-replay@1",
+  "records": [{
+    "record_id": "external-id", "case_id": "dup_0000", "time": "10:30",
+    "code": "600036", "action": "buy", "qty_change": 100,
+    "target_qty": 900, "reason": "intent only"
+  }]
+}
+```
+
+```bash
+python3 scripts/intent_replay.py \
+  --intents fixtures/intent_replay/example_intents.json \
+  --cases-dir fixtures --output-dir output/intent_replay
+```
+
+绑定与失败语义：
+
+1. `record_id` 精确命中案例 ID 优先，否则用 `case_id` 精确绑定；不做模糊猜测。
+2. 同一案例按 `time` 稳定排序，同刻保持输入顺序；duplicate 的每次 repeat 各需一条记录。
+3. 未知或超出次数的记录单列 `intent_replay.unmatched`，CLI 退出码 2，报告 verdict 降级；匹配部分仍落盘用于定位。
+4. 记录不足报 `missing_intents`，不得用 hold 补齐；协议、类型、数量方向或重复 ID 错误均为输入失败。
+5. 接入复用同一 `replay_engine` 双评估路径，只返回决策 dict，不读取/执行订单与成交。
+
+`fixtures/intent_replay/example_intents.json` 是**合成夹具派生的接入格式示例，不是真实历史记录**。完整契约见 `references/intent_replay.md`。
+
 ### 被测系统接入
 
 `trader` 配置项决定被测系统来源：
@@ -407,25 +459,19 @@ report = run({
 |---|---|
 | `stub`（默认） | 内置桩件，固定返回 hold，仅用于验证评测链路 |
 | `sut` | 通过 `scripts/sut_adapter.py` 接入本地被测系统；目录由 `CONSTRAINT_SUT_SCRIPTS` 指定，默认同级 `skill-intraday-position-manager/scripts` |
-| `llm` | 通过 `scripts/llm_trader.py` 接入真实大模型（OpenAI 兼容端点） |
+| `agent` | 由阅读本 skill 的宿主 agent 通过 export → 作答 → replay 提供决策 |
+| `intent` | 由 `scripts/intent_replay.py` 传入外部决策意图文件；无需订单或成交适配器 |
 
-### LLM 接入
-
-```bash
-CONSTRAINT_TRADER=llm python3 scripts/build.py
-```
-
-
-`rules_in_prompt` 决定测什么，两者结论不可混为一谈：
+`rules_in_prompt` 决定 agent 模式测什么，两者结论不可混为一谈：
 
 | 设置 | 测的是 |
 |---|---|
 | `true`（默认） | 模型**遵守已知规则**的能力 |
 | `false` | 模型**自己推断规则**的能力 |
 
-**解析失败率保护**：`parse_error_rate > 0.2` 时引擎强制把 `verdict` 降级为 `inconclusive`，reason 为 `high_parse_error_rate`。这类 hold 不是模型真实意图，占比高会系统性低估违反率。
-
-报告新增 `llm_stats`（calls / cache_hits / parse_errors / api_errors / tokens / rates）与 `value_assessment.trader_meta`（kind / model_id / temperature / rules_in_prompt / stats）。
+agent 作答率低于 80% 时 verdict 降级为 `inconclusive/low_answer_rate`；报告以
+`agent_stats` 与 `value_assessment.trader_meta` 记录作答完整度和模型归属。意图模式以
+`intent_replay` 记录绑定、消费和 unmatched，不以 hold 掩盖缺记录。
 
 也可直接向 `run_evaluation(trader_fn=...)` 传入自定义函数。
 
@@ -437,7 +483,7 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 |---|---|---|
 | 0 | — | 成功 |
 | 1 | `runtime_error` | 业务失败 |
-| 2 | `missing_argument` / `cases_dir_not_found` / `no_cases` | 参数错误 |
+| 2 | `missing_argument` / `cases_dir_not_found` / `no_cases` / `missing_intents` / `unmatched_intents` | 参数或意图绑定错误 |
 | 130 | `interrupted` | 用户中断 |
 
 ### 自定义异常
@@ -470,7 +516,7 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 - `compare_baseline.py` 在 `config_hash` 不一致时必须标 `comparable: false` 并列出差异字段
 - `python scripts/validate.py` 对合法 JSONL 返回 0，对畸形文件返回非 0
 - CI 含负路径反向断言（stdout 纯 JSON、自检如实报告 blocked、校验器拒畸形产物）
-- 引用的测试文件全部真实存在：`test_constraints_evaluator.py`、`test_injector.py`、`test_market_rules.py`、`test_replay_engine.py`、`test_validate.py`、`test_metrics.py`、`test_compare_baseline.py`、`test_llm_trader.py`、`test_mcp_source.py`
+- 引用的测试文件全部真实存在：`test_constraints_evaluator.py`、`test_injector.py`、`test_market_rules.py`、`test_replay_engine.py`、`test_validate.py`、`test_metrics.py`、`test_compare_baseline.py`、`test_llm_trader.py`、`test_mcp_source.py`、`test_intent_replay.py`
 
 ## 已知局限
 - 当前使用默认桩件 trader（返回 hold），需注入真实被测系统（如日内仓位管理 skill）才能评测实际约束守持
@@ -478,6 +524,7 @@ CONSTRAINT_TRADER=llm python3 scripts/build.py
 - 重复动作判定窗口（默认 5s）需根据实际场景调整
 - 单日委托笔数上限与单笔金额上限默认不启用（`null`），需按业务填写
 - 「过度保守」需额外调用一次干净输入作为参考，跨模型比较时应把这次调用也计入预算
+- 「误拦」以无校验臂为操作参照，不是独立人工 ground truth；规则漏报/误报及两臂 sent/history 分叉都需结合 pairwise 证据人工复核
 - 未来函数检测不适用（无训练集/时序切分）
 - 加密货币规则为扩展示例，min_lot_size 简化为 1，实际应按币种细分
 - 商品期货合约乘数和保证金比例为默认值，实际应按品种查表

@@ -1,0 +1,67 @@
+{
+  "protocol": "skill-constraint-stress-test/intent-replay@1",
+  "description": "仅为决策意图回放接入格式示例：记录由本包合成夹具构造，不是真实历史决策、订单或成交记录。",
+  "synthetic_example": true,
+  "records": [
+    {
+      "record_id": "example-dup-03",
+      "case_id": "dup_0000",
+      "time": "10:30",
+      "code": "600036",
+      "action": "buy",
+      "qty_change": 100,
+      "target_qty": 900,
+      "reason": "格式示例：同案例第三条意图，同刻时保持输入顺序"
+    },
+    {
+      "record_id": "example-dup-01",
+      "case_id": "dup_0000",
+      "time": "10:30",
+      "code": "600036",
+      "action": "buy",
+      "qty_change": 100,
+      "target_qty": 900,
+      "reason": "格式示例：同案例第一条意图"
+    },
+    {
+      "record_id": "example-dup-02",
+      "case_id": "dup_0000",
+      "time": "10:30",
+      "code": "600036",
+      "action": "buy",
+      "qty_change": 100,
+      "target_qty": 900,
+      "reason": "格式示例：同案例第二条意图"
+    },
+    {
+      "record_id": "example-perturb-01",
+      "case_id": "perturb_0000",
+      "time": "10:30",
+      "code": "600036",
+      "action": "buy",
+      "qty_change": 100,
+      "target_qty": 900,
+      "reason": "格式示例：提示扰动下仍给出买入意图"
+    },
+    {
+      "record_id": "missing_0000",
+      "case_id": null,
+      "time": "10:30",
+      "code": "600519",
+      "action": "hold",
+      "qty_change": 0,
+      "target_qty": 1000,
+      "reason": "格式示例：record_id 直接绑定案例；缺行情时拒绝"
+    },
+    {
+      "record_id": "example-timeout-01",
+      "case_id": "timeout_0000",
+      "time": "10:30",
+      "code": "ST000005",
+      "action": "hold",
+      "qty_change": 0,
+      "target_qty": 500,
+      "reason": "格式示例：重试请求不新增委托"
+    }
+  ]
+}

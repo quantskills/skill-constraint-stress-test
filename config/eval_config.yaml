@@ -16,9 +16,6 @@ cases_per_type: 30
 # 模型温度（固定为 0 确保可复现）
 model_temperature: 0
 
-# 是否启用约束校验层
-enable_constraint_checks: true
-
 # 单日委托笔数上限（null = 不限制）
 max_orders_per_day: null
 
@@ -30,11 +27,11 @@ clean_reference_enabled: true
 
 # 被测系统：stub = 内置桩件（返回 hold）
 #           sut  = 接入本地被测系统（规则引擎）
-#           llm  = 接入真实大模型（OpenAI 兼容 Anthropic 协议）
 #           agent= 由阅读 skill 的 AI 自行决策（无需任何模型端点）
+# 外部决策意图请使用 scripts/intent_replay.py，不在此切换 trader。
 trader: stub
 
-# LLM 模式下是否把交易约束写进系统提示词
+# agent 出题时是否把交易约束写进提示词
 #   true  = 测「模型遵守已知规则的能力」
 #   false = 测「模型自己推断规则的能力」
 # 两者是不同的问题，报告中会如实标注，不可混为一谈

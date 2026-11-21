@@ -52,6 +52,16 @@ class TestValidateEvent:
         errors = validate_event(_make_valid_event(is_duplicate_action="yes"), 1)
         assert any("is_duplicate_action" in e for e in errors)
 
+    def test_block_evidence_fields_must_be_boolean(self):
+        names = (
+            "baseline_is_order", "blocked_on_violation",
+            "blocked_without_violation", "cascade_unblocked",
+        )
+        for name in names:
+            assert validate_event(_make_valid_event(**{name: True}), 1) == []
+            errors = validate_event(_make_valid_event(**{name: 1}), 1)
+            assert any(name in error for error in errors)
+
 
 class TestValidateJsonl:
     def test_valid_file(self):

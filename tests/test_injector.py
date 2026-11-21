@@ -3,12 +3,14 @@
 import pytest
 from scripts.injector import (
     InjectionType,
+    InjectionCase,
     MissingQuoteSubtype,
     inject_fault,
     generate_duplicate_cases,
     generate_prompt_perturb_cases,
     generate_missing_quote_cases,
     generate_timeout_retry_cases,
+    bind_machine_refs,
 )
 
 
@@ -103,3 +105,22 @@ class TestCaseGenerators:
         assert len(cases) == 30
         partial_count = sum(1 for c in cases if c.params.get("partial_success"))
         assert partial_count > 0
+
+
+class TestQuoteAwareBinding:
+    def test_quote_less_fixtures_only_bind_to_missing_quote(self, base_position):
+        positions = {
+            "position_0000": dict(base_position),
+            "position_0001": dict(base_position, price=None),
+            "position_0002": dict(base_position, price=0),
+        }
+        cases = [
+            InjectionCase("prompt", InjectionType.PROMPT_PERTURB, position_ref="position_0000"),
+            InjectionCase("timeout", InjectionType.TIMEOUT_RETRY, position_ref="position_0001"),
+            InjectionCase("missing", InjectionType.MISSING_QUOTE, position_ref="position_0002"),
+        ]
+        bound = bind_machine_refs(cases, positions)
+        by_id = {case.case_id: case.position_ref for case in bound}
+        assert positions[by_id["prompt"]]["price"] not in (None, 0)
+        assert positions[by_id["timeout"]]["price"] not in (None, 0)
+        assert by_id["missing"] in {"position_0001", "position_0002"}

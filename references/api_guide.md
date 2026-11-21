@@ -138,3 +138,9 @@ mcp__pandadata__call_pandadata({
 
 `scripts/mcp_source.py` 与 `scripts/fixture_generator.py` 均为**纯标准库、不联网**。
 评测执行阶段只读 `fixtures/`，clone 即可运行。
+
+## 9. 决策意图接入
+
+只输出决策意图的外部系统使用 `skill-constraint-stress-test/intent-replay@1`，不需要订单、
+成交或账户字段。协议、精确绑定、稳定排序、unmatched 非零退出，以及 block_rate /
+false_block_rate 的定义与局限见 [`intent_replay.md`](intent_replay.md)。

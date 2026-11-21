@@ -27,6 +27,64 @@ SUT_SCRIPTS = Path(
         _SKILL_ROOT.parent / "skill-intraday-position-manager" / "scripts",
     )
 )
+
+
+class SutUnavailable(RuntimeError):
+    """被测系统不可用：缺目录、缺 run()、或解析到了本包自己。
+
+    这是**必须先于回测失败**的条件。此前 `from build import run` 在本包
+    `scripts/build.py` 也在 `sys.path` 上时，会静默导入本包自己的 `run()`
+    （返回 dict 而非 list），随后被 `except Exception` 吞成逐条 hold ——
+    结果是退出码 0、`config_hash` 不变、报告看起来正常，但 `baseline_order_events=0`、
+    违规 0、拦截 0，`inconclusive`。那是最坏的一种失败：读起来像「被测系统很守规」，
+    实际是「被测系统根本没跑」。现在改成结构化报错，宁可不出报告。
+    """
+
+    def __init__(self, message: str, *, hint: str = "") -> None:
+        super().__init__(message)
+        self.message = message
+        self.hint = hint
+
+
+def resolve_sut() -> Any:
+    """Import the SUT's ``run`` after proving it comes from the SUT tree.
+
+    模块**来源**必须落在 :data:`SUT_SCRIPTS` 下。仅检查 `import` 成功不够：
+    本包的 `scripts/build.py` 同样暴露 `run()`，名字冲突会让「没装 SUT」
+    看起来像「SUT 可用」。
+    """
+    if not SUT_SCRIPTS.is_dir():
+        raise SutUnavailable(
+            "被测系统脚本目录不存在: %s" % SUT_SCRIPTS,
+            hint="设置 CONSTRAINT_SUT_SCRIPTS 指向被测系统的 scripts/，"
+                 "或把 skill-intraday-position-manager 放到同级目录",
+        )
+    resolved = SUT_SCRIPTS.resolve()
+    if str(resolved) not in sys.path:
+        sys.path.insert(0, str(resolved))
+    try:
+        from build import run as sut_run  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise SutUnavailable(
+            "无法从 %s 导入 run(): %s" % (resolved, exc),
+            hint="被测系统需提供 scripts/build.py 与 run(input, config)",
+        ) from exc
+
+    origin = Path(getattr(sut_run, "__module__", "") and
+                  getattr(sys.modules.get(sut_run.__module__), "__file__", "") or "")
+    try:
+        origin_resolved = Path(str(sut_run.__globals__.get("__file__", ""))).resolve()
+    except (TypeError, ValueError):
+        origin_resolved = Path(str(origin)).resolve() if str(origin) else None
+    if origin_resolved is None or resolved not in origin_resolved.parents:
+        raise SutUnavailable(
+            "run() 解析到了 %s，不在被测系统目录 %s 下——很可能是本包自己的 "
+            "scripts/build.py 顶替了被测系统" % (origin_resolved or "<unknown>", resolved),
+            hint="确认被测系统目录里有 build.py，且 CONSTRAINT_SUT_SCRIPTS 指对了",
+        )
+    return sut_run
+
+
 _SUT_RESOLVED = SUT_SCRIPTS.resolve()
 if _SUT_RESOLVED.is_dir() and str(_SUT_RESOLVED) not in sys.path:
     sys.path.insert(0, str(_SUT_RESOLVED))
@@ -80,8 +138,7 @@ def sut_trader(perturbed_input: dict[str, Any], config: dict[str, Any]) -> dict[
     }
 
     try:
-        from build import run as sut_run
-
+        sut_run = resolve_sut()
         results = sut_run(sut_input)
         if results and len(results) > 0:
             decision = results[0]
@@ -90,6 +147,10 @@ def sut_trader(perturbed_input: dict[str, Any], config: dict[str, Any]) -> dict[
             return decision
         return _make_hold(code, pnl_pct, total_qty, time_str, "[EMPTY] SUT returned empty")
 
+    except SutUnavailable:
+        # 依赖缺失是**配置错误**，不是「被测系统拒绝执行」：绝不能用 hold 冒充，
+        # 否则整份报告会退化成「零违规、零拦截」的假象。
+        raise
     except (ValueError, TypeError, KeyError) as e:
         return _make_hold(
             code, pnl_pct, total_qty, time_str,

@@ -1,6 +1,6 @@
 {
   "name": "skill-constraint-stress-test",
-  "version": "0.4.3",
+  "version": "0.5.1",
   "entrypoint": "SKILL.md",
   "runtime": "python>=3.10",
   "license": "GPL-3.0-only",
@@ -26,7 +26,7 @@
         "id": "sut-rule-engine",
         "role": "subject",
         "status": "evaluated",
-        "description": "内置规则引擎（只看浮盈亏阈值下单），判别臂：35.28%→0%，p=5.069e-29，verdict=positive",
+        "description": "外部被测系统 sut（同类 skill-intraday-position-manager 的规则引擎，只看浮盈亏阈值下单；本包不随带，需经 CONSTRAINT_SUT_SCRIPTS 或同级目录提供，缺失时结构化失败）。v0.5.0 判别臂：37.50%→0%，block_rate=99.26%，false_block_rate=0%，p=9.008e-31，verdict=positive",
         "budget": {
           "tokens": 0,
           "timeout_s": 0
@@ -72,16 +72,51 @@
   "data_source_note": "数据获取由阅读 skill 的 AI 调用 PandaData MCP 工具 mcp__pandadata__call_pandadata 完成（OAuth 登录；skill 不含任何凭证），取回结果落盘 JSON 后由 fixture_generator.py --from-mcp 转换；评测执行阶段只读本地 fixture，完全离线",
   "outputs": {
     "shipped_evidence": [
-      "output/report.json",
-      "output/report_sut_discriminative.json",
-      "output/agent_decisions_host.json"
+      {
+        "path": "output/report.json",
+        "arm": "stub-trader",
+        "description": "默认 stub 臂聚合报告；固定 hold，仅证明链路可运行，不是宿主 agent 结果"
+      },
+      {
+        "path": "output/report_sut_discriminative.json",
+        "arm": "sut-rule-engine",
+        "description": "sut 判别臂聚合报告，含 block_rate、false_block_rate 与 cascade_unblocked"
+      },
+      {
+        "path": "output/events_with_checks.jsonl",
+        "arm": "sut-rule-engine/with-checks",
+        "description": "sut 判别臂有校验层逐事件证据；was_blocked 为实际拦截"
+      },
+      {
+        "path": "output/events_without_checks.jsonl",
+        "arm": "sut-rule-engine/without-checks",
+        "description": "同一批 sut 事件的无校验参照臂；hard_violations 是误拦判据的参照"
+      },
+      {
+        "path": "output/pairwise_comparison.jsonl",
+        "arm": "sut-rule-engine/paired",
+        "description": "两臂逐条配对，含 event_id、baseline_event_id、blocked_on_violation、blocked_without_violation 与 cascade_unblocked"
+      },
+      {
+        "path": "output/agent_decisions_host.json",
+        "arm": "host-agent",
+        "description": "宿主 agent 历史作答原件；其聚合结论以 baselines/agent_run_host_model.json 为冻结锚点"
+      }
     ],
     "frozen_anchors": [
-      "baselines/agent_run_host_model.json",
-      "baselines/sut_discriminative.json"
+      {
+        "path": "baselines/agent_run_host_model.json",
+        "arm": "host-agent",
+        "description": "宿主 agent 历史运行的冻结摘要，180/180 作答，verdict=inconclusive"
+      },
+      {
+        "path": "baselines/sut_discriminative.json",
+        "arm": "sut-rule-engine",
+        "description": "sut 判别臂冻结摘要；配置与指标按文件内记录解读"
+      }
     ],
     "regenerated_on_run": "output/",
-    "anchor_check": "python3 scripts/compare_baseline.py compare output/report_sut_discriminative.json baselines/sut_discriminative.json",
-    "note": "两臂证据随包发布：宿主 agent 守规臂（verdict=inconclusive，基线仅 1 笔违规）与 sut 犯错臂（35.28%→0%，p=5.069e-29，verdict=positive），用于证明判定器有区分度而非加层即归零。"
+    "anchor_check": "python3 scripts/compare_baseline.py compare --against baselines/sut_discriminative.json output/report_sut_discriminative.json",
+    "note": "证据按被测系统与臂分别归属：report.json 是 stub 默认臂；report_sut_discriminative.json 与三个 events/pairwise 文件是 sut 判别臂；agent_decisions_host.json 与 agent_run_host_model.json 才是宿主 agent 历史臂。不同 model_id 不合并统计。"
   }
 }

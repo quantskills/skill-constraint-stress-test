@@ -50,8 +50,8 @@
     "lesson": "决策自述不可单独采信，必须有独立校验层；本例是校验层拦下真实违规的唯一直接证据"
   },
   "how_to_reproduce": [
-    "python3 scripts/agent_mode.py export --cases-dir fixtures --out requests.json",
+    "python3 scripts/agent_mode.py export --cases-dir fixtures --output requests.json",
     "由宿主 agent 逐条填写 decision（同一输入同答，等价温度 0）",
-    "CONSTRAINT_TRADER=agent CONSTRAINT_AGENT_DECISIONS=decisions.json python3 scripts/build.py fixtures"
+    "python3 scripts/agent_mode.py replay --decisions decisions.json --cases-dir fixtures --output-dir output"
   ]
 }
