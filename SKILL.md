@@ -3,6 +3,14 @@ name: skill-constraint-stress-test
 description: 当需要评测 AI 交易员在异常数据和重复请求下是否守住交易约束时，使用此 skill。支持四类故障注入（同输入重复、提示扰动、缺失行情、超时/重试），市场无关的约束判定器，有/无校验层前后对照，输出约束违反率、重复动作率与拒绝执行表现。
 tags: [quant, build, engineered, 约束测试, 故障注入, 压力测试]
 license: GPL-3.0-only
+metadata:
+  license: GPL-3.0-only
+  organization: QuantSkills
+  organization_url: https://github.com/quantskills
+  repository: skill-constraint-stress-test
+  repository_url: https://github.com/quantskills/skill-constraint-stress-test
+  project_type: skill
+  collection: evaluation
 ---
 
 # AI 交易员约束压力测试与故障注入回放

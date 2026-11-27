@@ -1,5 +1,9 @@
 # AI Trader Constraint Stress Test & Fault-Injection Replay
 
+[简体中文](README.md) | English
+
+QuantSkills release maintainer: [abgyjaguo](https://github.com/abgyjaguo).
+
 Use this skill when you need to evaluate whether an AI trader respects trading constraints under abnormal data and repeated requests. It supports four fault-injection types, a market-agnostic constraint evaluator, and a with/without constraint-layer comparison that reports violation, block, false-block, duplicate-action, and refusal metrics. External systems may replay decision intents without providing orders or fills.
 
 ## ⚠️ Disclaimer
